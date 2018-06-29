@@ -3,7 +3,7 @@
 
 **Whatsapp Web Client written in Rust**
 
-Big thanks to https://github.com/sigalor and contributors of https://github.com/sigalor/whatsapp-web-reveng 🍻
+Big thanks to [sigalor](https://github.com/sigalor) and contributors of [whatsapp-web-reveng](https://github.com/sigalor/whatsapp-web-reveng) 🍻
 
 
 ## Features

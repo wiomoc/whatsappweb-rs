@@ -3,6 +3,10 @@ name = "whatsappweb"
 version = "0.0.1"
 authors = ["Christoph Walcher <christoph-wa@gmx.de>"]
 build = "build.rs"
+description = "WIP Whatsapp Web API Client"
+repository = "https://github.com/wiomoc/whatsappweb-rs"
+readme = "README.md"
+categories = ["api"]
 
 [profile.release]
 opt-level = 3
