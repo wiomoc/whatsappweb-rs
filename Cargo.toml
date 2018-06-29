@@ -7,6 +7,7 @@ description = "WIP Whatsapp Web API Client"
 repository = "https://github.com/wiomoc/whatsappweb-rs"
 readme = "README.md"
 categories = ["api"]
+license = "MIT"
 
 [profile.release]
 opt-level = 3
