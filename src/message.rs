@@ -1,10 +1,14 @@
-use super::message_wire;
-use super::Jid;
+use std::time::Duration;
+use std::str::FromStr;
+
 use protobuf;
 use chrono::NaiveDateTime;
-use std::time::Duration;
 use protobuf::Message;
 use ring::rand::{SystemRandom, SecureRandom};
+
+use super::message_wire;
+use super::Jid;
+use errors::*;
 
 #[derive(Debug, Clone, PartialOrd, PartialEq)]
 pub struct MessageId(pub String);
@@ -38,19 +42,16 @@ pub enum Direction {
 }
 
 impl Direction {
-    fn parse(mut key: message_wire::MessageKey) -> Result<Direction, ()> {
+    fn parse(mut key: message_wire::MessageKey) -> Result<Direction> {
         let remote_jid = Jid::from_str(&key.take_remoteJid())?;
-        Ok(match key.get_fromMe() {
-            true => {
-                Direction::Sending(remote_jid)
-            }
-            false => {
-                Direction::Receiving(if key.has_participant() {
-                    Peer::Group { group: remote_jid, participant: Jid::from_str(&key.take_participant())? }
-                } else {
-                    Peer::Individual(remote_jid)
-                })
-            }
+        Ok(if key.get_fromMe() {
+            Direction::Sending(remote_jid)
+        } else {
+            Direction::Receiving(if key.has_participant() {
+                Peer::Group { group: remote_jid, participant: Jid::from_str(&key.take_participant())? }
+            } else {
+                Peer::Individual(remote_jid)
+            })
         })
     }
 }
@@ -141,7 +142,7 @@ pub enum ChatMessageContent {
 }
 
 impl ChatMessageContent {
-    fn from_proto(mut message: message_wire::Message) -> Result<ChatMessageContent, ()> {
+    fn from_proto(mut message: message_wire::Message) -> Result<ChatMessageContent> {
         Ok(if message.has_conversation() {
             ChatMessageContent::Text(message.take_conversation())
         } else if message.has_imageMessage() {
@@ -163,7 +164,7 @@ impl ChatMessageContent {
                 enc_sha256: audio_message.take_fileEncSha256(),
                 size: audio_message.get_fileLength() as usize,
                 key: audio_message.take_mediaKey()
-            }, Duration::new(audio_message.get_seconds() as u64, 0))
+            }, Duration::new(u64::from(audio_message.get_seconds()), 0))
         } else if message.has_documentMessage() {
             let mut document_message = message.take_documentMessage();
             ChatMessageContent::Document(FileInfo {
@@ -223,8 +224,8 @@ pub struct ChatMessage {
 }
 
 impl ChatMessage {
-    pub fn from_proto(content: &[u8]) -> Result<ChatMessage, ()> {
-        let mut webmessage = protobuf::parse_from_bytes::<message_wire::WebMessageInfo>(content).map_err(|_| ())?;
+    pub fn from_proto(content: &[u8]) -> Result<ChatMessage> {
+        let mut webmessage = protobuf::parse_from_bytes::<message_wire::WebMessageInfo>(content).chain_err(|| "Invalid Protobuf chatmessage")?;
         debug!("Processing WebMessageInfo: {:?}", &webmessage);
         let mut key = webmessage.take_key();
 
@@ -264,9 +265,6 @@ impl ChatMessage {
 
 impl Jid {
     pub fn to_message_jid(&self) -> String {
-        self.id.to_string() + match self.is_group {
-            true => "@g.us",
-            false => "@s.whatsapp.net"
-        }
+        self.id.to_string() + if self.is_group { "@g.us" } else { "@s.whatsapp.net" }
     }
 }

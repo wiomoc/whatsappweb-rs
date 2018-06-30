@@ -1,13 +1,17 @@
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::collections::HashMap;
 use std::io::{Read, Write, Result, Cursor};
 use std::char;
-use Jid;
 use std::borrow::Cow;
 use std::ops::Deref;
 
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+
+use Jid;
+use errors;
+use errors::{ResultExt, ErrorKind};
 
 const LIST_EMPTY: u8 = 0;
+#[allow(dead_code)]
 const STREAM_END: u8 = 2;
 const DICTIONARY_0: u8 = 236;
 const DICTIONARY_1: u8 = 237;
@@ -21,6 +25,7 @@ const BINARY_8: u8 = 252;
 const BINARY_20: u8 = 253;
 const BINARY_32: u8 = 254;
 const NIBBLE_8: u8 = 255;
+#[allow(dead_code)]
 const PACKED_MAX: u8 = 254;
 
 const TOKENS: [&str; 148] = ["200", "400", "404", "500", "501", "502", "action", "add",
@@ -83,22 +88,22 @@ impl NodeContent {
         }
     }
 
-    pub fn into_jid(self) -> Option<Jid> {
+    pub fn into_jid(self) -> errors::Result<Jid> {
         match self {
-            NodeContent::Jid(jid) => Some(jid),
-            _ => None
+            NodeContent::Jid(jid) => Ok(jid),
+            _ => bail! {"not a jid"}
         }
     }
 
     pub fn as_str(&self) -> &str {
-        match self {
-            &NodeContent::None => "",
-            &NodeContent::List(_) => unimplemented!(),
-            &NodeContent::String(ref string) => string.deref(),
-            &NodeContent::Nibble(ref string) => string.deref(),
-            &NodeContent::Binary(_) => unimplemented!(),
-            &NodeContent::Jid(_) => unimplemented!(),//jid.to_string().as_str()
-            &NodeContent::Token(ref token) => token
+        match *self {
+            NodeContent::None => "",
+            NodeContent::List(_) => unimplemented!(),
+            NodeContent::String(ref string) => string.deref(),
+            NodeContent::Nibble(ref string) => string.deref(),
+            NodeContent::Binary(_) => unimplemented!(),
+            NodeContent::Jid(_) => unimplemented!(),//jid.to_string().as_str()
+            NodeContent::Token(ref token) => token
         }
     }
 }
@@ -113,7 +118,7 @@ pub struct Node {
 fn read_list_size(tag: u8, stream: &mut Read) -> Result<u16> {
     match tag {
         LIST_EMPTY => Ok(0),
-        LIST_8 => Ok(stream.read_u8()? as u16),
+        LIST_8 => Ok(u16::from(stream.read_u8()?)),
         LIST_16 => stream.read_u16::<LittleEndian>(),
         _ => Ok(0)
     }
@@ -158,7 +163,7 @@ fn write_list(list: Vec<Node>, stream: &mut Write) -> Result<()> {
 fn nibble_to_char(nibble: u8) -> char {
     match nibble {
         0 ... 9 =>
-            char::from_digit(nibble as u32, 10).unwrap().to_ascii_uppercase(),
+            char::from_digit(u32::from(nibble), 10).unwrap().to_ascii_uppercase(),
         10 => '-',
         11 => '.',
         15 => '\0',
@@ -224,8 +229,8 @@ fn read_node_content(tag: u8, stream: &mut Read) -> Result<NodeContent> {
             for _ in 0..(startbyte & 127) {
                 let byte = stream.read_u8()?;
                 if tag == HEX_8 {
-                    string.push(char::from_digit(((byte >> 4) & 0x0F) as u32, 16).unwrap().to_ascii_uppercase());
-                    string.push(char::from_digit((byte & 0x0F) as u32, 16).unwrap().to_ascii_uppercase());
+                    string.push(char::from_digit(u32::from((byte >> 4) & 0x0F), 16).unwrap().to_ascii_uppercase());
+                    string.push(char::from_digit(u32::from(byte & 0x0F), 16).unwrap().to_ascii_uppercase());
                 } else {
                     let mut nibble = nibble_to_char((byte >> 4) & 0x0F);
                     if nibble == '\0' {
@@ -257,7 +262,7 @@ fn read_node_content(tag: u8, stream: &mut Read) -> Result<NodeContent> {
 fn write_node_binary(binary: &[u8], stream: &mut Write) -> Result<()> {
     stream.write_u8(BINARY_8)?;
     stream.write_u8(binary.len() as u8)?;
-    stream.write(binary)?;
+    stream.write_all(binary)?;
     Ok(())
 }
 
@@ -328,16 +333,16 @@ impl Node {
         }
     }
 
-    pub fn desc<'a>(&'a self) -> &'a str {
+    pub fn desc(&self) -> &str {
         self.desc.deref()
     }
 
-    pub fn take_attribute<K: IntoCow>(&mut self, key: K) -> Option<NodeContent> {
-        self.attributes.remove(&key.cow())
+    pub fn take_attribute(&mut self, key: &'static str) -> errors::Result<NodeContent> {
+        self.attributes.remove(&key.cow()).ok_or_else(|| ErrorKind::NodeAttributeMissing(key).into())
     }
 
-    pub fn get_attribute<'a, K: IntoCow>(&'a self, key: K) -> Option<&'a NodeContent> {
-        self.attributes.get(&key.cow())
+    pub fn get_attribute<'a>(&'a self, key: &'static str) -> errors::Result<&'a NodeContent> {
+        self.attributes.get(&key.cow()).ok_or_else(|| ErrorKind::NodeAttributeMissing(key).into())
     }
 
     pub fn set_attribute<K: IntoCow>(&mut self, key: K, value: NodeContent) {
@@ -345,8 +350,8 @@ impl Node {
     }
 
 
-    pub fn deserialize(data: &[u8]) -> Result<Node> {
-        Node::deserialize_stream(&mut Cursor::new(data))
+    pub fn deserialize(data: &[u8]) -> errors::Result<Node> {
+        Node::deserialize_stream(&mut Cursor::new(data)).chain_err(|| "Node has invalid binary format")
     }
 
     fn deserialize_stream(stream: &mut Read) -> Result<Node> {
@@ -391,10 +396,10 @@ impl Node {
         }
     }
 
-    pub fn serialize(self) -> Result<Vec<u8>> {
+    pub fn serialize(self) -> Vec<u8> {
         let mut cursor = Cursor::new(Vec::new());
-        self.serialize_stream(&mut cursor)?;
-        Ok(cursor.into_inner())
+        self.serialize_stream(&mut cursor).unwrap();
+        cursor.into_inner()
     }
 
     fn serialize_stream(self, stream: &mut Write) -> Result<()> {
@@ -454,7 +459,7 @@ impl IntoCow for &'static str {
 
 impl IntoCow for String {
     fn cow(self) -> Cow<'static, str> {
-        Cow::Owned(self.into())
+        Cow::Owned(self)
     }
 }
 
@@ -472,7 +477,7 @@ mod tests {
 
         let node = Node::new("action", HashMap::new(), NodeContent::List(vec![Node::new("chat", attributes, NodeContent::None)]));
 
-        let node_ser_de = Node::deserialize(&node.clone().serialize().unwrap()).unwrap();
+        let node_ser_de = Node::deserialize(&node.clone().serialize()).unwrap();
 
         assert_eq!(node_ser_de, node);
     }

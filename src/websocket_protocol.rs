@@ -7,8 +7,8 @@ use ws::Message;
 use json;
 use json::JsonValue;
 
-
 #[derive(Copy, Clone, PartialEq)]
+#[allow(dead_code)]
 pub enum WebsocketMessageMetric {
     None = 0,
     DebugLog = 1,
@@ -92,9 +92,9 @@ impl<'a> WebsocketMessage<'a> {
 
     #[inline]
     pub fn deserialize(message: &'a Message) -> Result<WebsocketMessage<'a>, ()> {
-        match message {
-            &Message::Text(ref message) => {
-                if let Some(sep) = message.find(",") {
+        match *message {
+            Message::Text(ref message) => {
+                if let Some(sep) = message.find(',') {
                     let (tag_str, payload) = message.split_at(sep + 1);
                     let tag = Cow::Borrowed(tag_str.split_at(sep).0);
 
@@ -109,7 +109,7 @@ impl<'a> WebsocketMessage<'a> {
                     Err(())
                 }
             }
-            &Message::Binary(ref message) => {
+            Message::Binary(ref message) => {
                 if let Some(sep) = message.iter().position(|x| x == &b',') {
                     Ok(WebsocketMessage {
                         tag: Cow::Borrowed(str::from_utf8(&message[..sep]).map_err(|_| ())?),

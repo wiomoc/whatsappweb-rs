@@ -1,12 +1,14 @@
 extern crate crypto;
 
 use ring;
-use MediaType;
 use ring::{agreement, rand, hkdf, hmac, digest};
 use ring::rand::{SystemRandom, SecureRandom};
 use self::crypto::{aes, blockmodes};
 use self::crypto::buffer::{RefWriteBuffer, RefReadBuffer, WriteBuffer};
 use untrusted;
+
+use MediaType;
+use errors::*;
 
 pub(crate) fn generate_keypair() -> (agreement::EphemeralPrivateKey, Vec<u8>) {
     let rng = rand::SystemRandom::new();
@@ -20,7 +22,7 @@ pub(crate) fn generate_keypair() -> (agreement::EphemeralPrivateKey, Vec<u8>) {
     (my_private_key, my_public_key)
 }
 
-pub(crate) fn calculate_secret_keys(secret: &[u8], private_key: agreement::EphemeralPrivateKey) -> Result<([u8; 32], [u8; 32]), ()> {
+pub(crate) fn calculate_secret_keys(secret: &[u8], private_key: agreement::EphemeralPrivateKey) -> Result<([u8; 32], [u8; 32])> {
     let peer_public_key_alg = &agreement::X25519;
 
     let public_key = untrusted::Input::from(&secret[..32]);
@@ -33,11 +35,11 @@ pub(crate) fn calculate_secret_keys(secret: &[u8], private_key: agreement::Ephem
                                                 }).unwrap();
     let mut secret_key_expanded = [0u8; 80];
 
-    hkdf::extract_and_expand(&hmac::SigningKey::new(&digest::SHA256, &vec![0u8; 32]), &secret_key, &[], &mut secret_key_expanded);
+    hkdf::extract_and_expand(&hmac::SigningKey::new(&digest::SHA256, &[0u8; 32]), &secret_key, &[], &mut secret_key_expanded);
 
     let signature = [&secret[..32], &secret[64..]].concat();
 
-    hmac::verify(&hmac::VerificationKey::new(&digest::SHA256, &secret_key_expanded[32..64]), &signature, &secret[32..64]).map_err(|_| ())?;
+    hmac::verify(&hmac::VerificationKey::new(&digest::SHA256, &secret_key_expanded[32..64]), &signature, &secret[32..64]).chain_err(|| "Invalid mac")?;
 
     let mut buffer = [0u8; 64];
 
@@ -53,15 +55,15 @@ pub(crate) fn calculate_secret_keys(secret: &[u8], private_key: agreement::Ephem
     Ok((enc, mac))
 }
 
-pub fn verify_and_decrypt_message(enc: &[u8], mac: &[u8], message_encrypted: &[u8]) -> Vec<u8> {
+pub fn verify_and_decrypt_message(enc: &[u8], mac: &[u8], message_encrypted: &[u8]) -> Result<Vec<u8>> {
     hmac::verify(&hmac::VerificationKey::new(&digest::SHA256, &mac),
-                 &message_encrypted[32..], &message_encrypted[..32]).unwrap();
+                 &message_encrypted[32..], &message_encrypted[..32]).chain_err(|| "Invalid mac")?;
 
     let mut message = vec![0u8; message_encrypted.len() - 48];
 
     let size_without_padding = aes_decrypt(enc, &message_encrypted[32..48], &message_encrypted[48..], &mut message);
     message.truncate(size_without_padding);
-    message
+    Ok(message)
 }
 
 pub(crate) fn sign_and_encrypt_message(enc: &[u8], mac: &[u8], message: &[u8]) -> Vec<u8> {
@@ -89,7 +91,7 @@ pub(crate) fn sign_challenge(mac: &[u8], challenge: &[u8]) -> hmac::Signature {
 
 fn derive_media_keys(key: &[u8], media_type: MediaType) -> [u8; 112] {
     let mut media_key_expanded = [0u8; 112];
-    hkdf::extract_and_expand(&hmac::SigningKey::new(&digest::SHA256, &vec![0u8; 32]), key, match media_type {
+    hkdf::extract_and_expand(&hmac::SigningKey::new(&digest::SHA256, &[0u8; 32]), key, match media_type {
         MediaType::Image => b"WhatsApp Image Keys",
         MediaType::Video => b"WhatsApp Video Keys",
         MediaType::Audio => b"WhatsApp Audio Keys",
@@ -129,7 +131,7 @@ pub fn encrypt_media_message(media_type: MediaType, file: &[u8]) -> (Vec<u8>, Ve
     (file_encrypted, media_key)
 }
 
-pub fn decrypt_media_message(key: &[u8], media_type: MediaType, file_encrypted: &[u8]) -> Vec<u8> {
+pub fn decrypt_media_message(key: &[u8], media_type: MediaType, file_encrypted: &[u8]) -> Result<Vec<u8>> {
     let media_key_expanded = derive_media_keys(key, media_type);
 
     let mut file = vec![0u8; file_encrypted.len() - 16];
@@ -145,14 +147,14 @@ pub fn decrypt_media_message(key: &[u8], media_type: MediaType, file_encrypted: 
                                &hmac_data);
 
     if file_encrypted[(size - 10)..] != signature.as_ref()[..10] {
-        panic!("Invalid mac {:?} {:?}", &file_encrypted[size - 10..], &signature.as_ref()[..10]);
+        bail!{"Invalid mac"}
     }
 
 
     let size_without_padding = aes_decrypt(&cipher_key, &media_key_expanded[0..16], &file_encrypted[..size - 10], &mut file);
     file.truncate(size_without_padding);
 
-    file
+    Ok(file)
 }
 
 pub(crate) fn aes_encrypt(key: &[u8], iv: &[u8], input: &[u8], output: &mut [u8]) -> usize {

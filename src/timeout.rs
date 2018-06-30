@@ -1,6 +1,6 @@
+use std::time::{SystemTime, UNIX_EPOCH};
 use ws::Sender;
 use ws::util::{Token, Timeout};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const RESPONSE_TIMEOUT: TimeoutWindow = TimeoutWindow { min: 3000, max: 5500 };
 pub const PING_TIMEOUT: TimeoutWindow = TimeoutWindow { min: 12000, max: 16000 };
@@ -66,6 +66,10 @@ impl TimeoutManager {
             self.token = Token(self.token.0 + 1);
             sender.timeout(new_window.max, self.token).unwrap();
         }
+    }
+
+    pub fn disarm(&mut self) {
+        self.timeout = None;
     }
 
     pub fn on_new_timeout(&mut self, token: Token, timeout: Timeout) {

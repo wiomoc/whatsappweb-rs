@@ -1,6 +1,7 @@
 use std::sync::Mutex;
 use std::collections::HashMap;
 use std::thread;
+use std::thread::JoinHandle;
 use std::marker::Send;
 use std::sync::Arc;
 use std::clone::Clone;
@@ -18,16 +19,17 @@ use ws::util::{Token, Timeout};
 use std::time::{SystemTime, Duration};
 use chrono::{NaiveDateTime, Utc};
 
-use super::crypto;
-use super::message::{ChatMessage as WhatsappMessage, MessageAck, ChatMessageContent, Peer, Direction, MessageId};
-use super::timeout;
-use super::json_protocol;
-use super::json_protocol::ServerMessage;
-use super::websocket_protocol::{WebsocketMessage, WebsocketMessagePayload, WebsocketMessageMetric};
-use super::node_protocol;
-use super::node_protocol::{AppMessage, MessageEventType, AppEvent, Query, GroupCommand};
-use super::node_wire::Node;
+use crypto;
+use message::{ChatMessage as WhatsappMessage, MessageAck, ChatMessageContent, Peer, Direction, MessageId};
+use timeout;
+use json_protocol;
+use json_protocol::ServerMessage;
+use websocket_protocol::{WebsocketMessage, WebsocketMessagePayload, WebsocketMessageMetric};
+use node_protocol;
+use node_protocol::{AppMessage, MessageEventType, AppEvent, Query, GroupCommand};
+use node_wire::Node;
 use super::{Jid, PresenceStatus, Contact, Chat, GroupMetadata, GroupParticipantsChange, ChatAction, MediaType};
+use errors::*;
 
 pub struct WhatsappWebConnection<H: WhatsappWebHandler + Send + Sync + 'static> {
     inner: Arc<Mutex<WhatsappWebConnectionInner<H>>>,
@@ -78,7 +80,7 @@ pub trait WhatsappWebHandler<H = Self> where H: WhatsappWebHandler<H> + Send + S
 
     fn on_disconnect(&self, reason: DisconnectReason);
 
-    fn on_message(&self, connection: &WhatsappWebConnection<H>, message_new: bool, message: WhatsappMessage);
+    fn on_message(&self, connection: &WhatsappWebConnection<H>, message_new: bool, message: Box<WhatsappMessage>);
 }
 
 enum SessionState {
@@ -108,6 +110,7 @@ struct WhatsappWebConnectionInner<H: WhatsappWebHandler<H> + Send + Sync + 'stat
 }
 
 impl<H: WhatsappWebHandler<H> + Send + Sync + 'static> WhatsappWebConnectionInner<H> {
+    
     fn send_json_message(&mut self, message: JsonValue, cb: Box<Fn(JsonValue, &WhatsappWebConnection<H>) + Send>) {
         debug!("sending json {:?}", &message);
         let tag = self.alloc_message_tag();
@@ -115,9 +118,8 @@ impl<H: WhatsappWebHandler<H> + Send + Sync + 'static> WhatsappWebConnectionInne
             tag: tag.into(),
             payload: WebsocketMessagePayload::Json(message)
         }, Box::new(move |payload, conn| {
-            match payload {
-                WebsocketResponse::Json(json) => { cb(json, conn) }
-                _ => {}
+            if let WebsocketResponse::Json(json) = payload { 
+                cb(json, conn) 
             }
         }));
     }
@@ -141,7 +143,7 @@ impl<H: WhatsappWebHandler<H> + Send + Sync + 'static> WhatsappWebConnectionInne
     #[inline]
     fn send_node_message(&mut self, tag: Option<String>, metric: WebsocketMessageMetric, node: Node, cb: Box<Fn(WebsocketResponse, &WhatsappWebConnection<H>) + Send>) {
         debug!("sending node {:?}", &node);
-        self.send_binary_message(tag, metric, node.serialize().unwrap(), cb);
+        self.send_binary_message(tag, metric, &node.serialize(), cb);
     }
 
     fn ws_send_message(&mut self, message: WebsocketMessage, callback: Box<Fn(WebsocketResponse, &WhatsappWebConnection<H>) + Send>) {
@@ -157,7 +159,7 @@ impl<H: WhatsappWebHandler<H> + Send + Sync + 'static> WhatsappWebConnectionInne
         tag.to_string()
     }
 
-    fn send_binary_message(&mut self, tag: Option<String>, metric: WebsocketMessageMetric, message: Vec<u8>, cb: Box<Fn(WebsocketResponse, &WhatsappWebConnection<H>) + Send>) {
+    fn send_binary_message(&mut self, tag: Option<String>, metric: WebsocketMessageMetric, message: &[u8], cb: Box<Fn(WebsocketResponse, &WhatsappWebConnection<H>) + Send>) {
         let encrypted_message = if let SessionState::Established { ref persistent_session } = self.session_state {
             crypto::sign_and_encrypt_message(&persistent_session.enc, &persistent_session.mac, &message)
         } else {
@@ -172,18 +174,18 @@ impl<H: WhatsappWebHandler<H> + Send + Sync + 'static> WhatsappWebConnectionInne
     }
 
 
-    fn decrypt_binary_message(&mut self, encrypted_message: &[u8]) -> Result<Vec<u8>, ()> {
+    fn decrypt_binary_message(&mut self, encrypted_message: &[u8]) -> Result<Vec<u8>> {
         if let SessionState::Established { ref persistent_session } = self.session_state {
-            Ok(crypto::verify_and_decrypt_message(&persistent_session.enc[..], &persistent_session.mac[..], &encrypted_message))
+            crypto::verify_and_decrypt_message(&persistent_session.enc[..], &persistent_session.mac[..], &encrypted_message)
         } else {
-            Err(())
+          bail!{"connection not established yet"}
         }
     }
 
-    fn handle_server_conn(&mut self, user_jid: Jid, client_token: &str, server_token: &str, secret: Option<&str>) -> Result<(PersistentSession, Jid), ()> {
+    fn handle_server_conn(&mut self, user_jid: Jid, client_token: &str, server_token: &str, secret: Option<&str>) -> Result<(PersistentSession, Jid)> {
         let (new_session_state, persistent_session, user_jid) = match self.session_state {
             SessionState::PendingNew { ref mut private_key, ref client_id, .. } => {
-                let secret = base64::decode(secret.ok_or(())?).map_err(|_| ())?;
+                let secret = base64::decode(secret.ok_or(ErrorKind::JsonFieldMissing("secret"))?)?;
                 let (enc, mac) = crypto::calculate_secret_keys(&secret, private_key.take().unwrap())?;
 
                 self.user_jid = Some(user_jid);
@@ -191,7 +193,7 @@ impl<H: WhatsappWebHandler<H> + Send + Sync + 'static> WhatsappWebConnectionInne
                 let persistent_session = PersistentSession {
                     client_token: client_token.to_string(),
                     server_token: server_token.to_string(),
-                    client_id: client_id.clone(),
+                    client_id: *client_id,
                     enc,
                     mac
                 };
@@ -202,16 +204,16 @@ impl<H: WhatsappWebHandler<H> + Send + Sync + 'static> WhatsappWebConnectionInne
                 self.user_jid = Some(user_jid);
 
                 let new_persistent_session = PersistentSession {
-                    client_id: persistent_session.client_id.clone(),
-                    enc: persistent_session.enc.clone(),
-                    mac: persistent_session.mac.clone(),
+                    client_id: persistent_session.client_id,
+                    enc: persistent_session.enc,
+                    mac: persistent_session.mac,
                     client_token: client_token.to_string(),
                     server_token: server_token.to_string()
                 };
 
                 (SessionState::Established { persistent_session: new_persistent_session.clone() }, new_persistent_session, self.user_jid.clone())
             }
-            _ => { return Err(()); }
+            _ => { bail!{"Session already established but received conn packet"} }
         };
         self.session_state = new_session_state;
         Ok((persistent_session, user_jid.unwrap()))
@@ -221,11 +223,11 @@ impl<H: WhatsappWebHandler<H> + Send + Sync + 'static> WhatsappWebConnectionInne
         if let WebsocketState::Connected(ref sender, ref mut timeout_manager) = self.websocket_state {
             match timeout_manager.on_timeout(event) {
                 Some(timeout::TimeoutState::Normal) => {
-                    sender.send(Message::Text("?,,".to_string()));
+                    sender.send(Message::Text("?,,".to_string())).ok();
                     timeout_manager.arm(&sender, timeout::RESPONSE_TIMEOUT, timeout::TimeoutState::Deathline);
                 }
                 Some(timeout::TimeoutState::Deathline) => {
-                    sender.close(CloseCode::Abnormal);
+                    sender.close(CloseCode::Abnormal).ok();
                 }
 
                 _ => {}
@@ -285,8 +287,8 @@ impl<H: WhatsappWebHandler<H> + Send + Sync + 'static> WhatsappWebConnectionInne
                 let mut init_command = json_protocol::build_init_request(base64::encode(&persistent_session.client_id).as_str());
 
                 (init_command, Box::new(move |response, connection| {
-                    if let Err(_) = json_protocol::parse_response_status(&response) {
-                        error!("error");
+                    if let Err(err) = json_protocol::parse_response_status(&response) {
+                        error!("error {:?}", err);
                     } else {
                         let mut inner = connection.inner.lock().unwrap();
                         let message: (JsonValue, Box<Fn(JsonValue, &WhatsappWebConnection<H>) + Send>) = match inner.session_state {
@@ -295,7 +297,8 @@ impl<H: WhatsappWebHandler<H> + Send + Sync + 'static> WhatsappWebConnectionInne
                                                                                               persistent_session.server_token.as_str(),
                                                                                               &base64::encode(&persistent_session.client_id));
                                 (login_command, Box::new(move |response, connection| {
-                                    if let Err(_) = json_protocol::parse_response_status(&response) {
+                                    if let Err(err) = json_protocol::parse_response_status(&response) {
+                                        error!("error {:?}", err);
                                         connection.ws_disconnect();
                                         connection.handler.on_disconnect(DisconnectReason::Removed);
                                     }
@@ -320,7 +323,7 @@ impl<H: WhatsappWebHandler<H> + Send + Sync> WhatsappWebConnection<H> {
 
         let (private_key, public_key) = crypto::generate_keypair();
 
-        let whatsapp_connection = WhatsappWebConnection {
+        WhatsappWebConnection {
             handler: Arc::new(handler),
             inner: Arc::new(Mutex::new(WhatsappWebConnectionInner {
                 user_jid: None,
@@ -330,18 +333,16 @@ impl<H: WhatsappWebHandler<H> + Send + Sync> WhatsappWebConnection<H> {
                 session_state: SessionState::PendingNew {
                     private_key: Some(private_key),
                     public_key,
-                    client_id: client_id.clone(),
+                    client_id,
                     qr_callback
                 },
                 epoch: 0
             }))
-        };
-
-        whatsapp_connection
+        }
     }
 
     fn with_persistent_session(persistent_session: PersistentSession, handler: H) -> WhatsappWebConnection<H> {
-        let whatsapp_connection = WhatsappWebConnection {
+        WhatsappWebConnection {
             handler: Arc::new(handler),
             inner: Arc::new(Mutex::new(WhatsappWebConnectionInner {
                 user_jid: None,
@@ -353,9 +354,7 @@ impl<H: WhatsappWebHandler<H> + Send + Sync> WhatsappWebConnection<H> {
                 },
                 epoch: 0
             }))
-        };
-
-        whatsapp_connection
+        }
     }
 
     fn send_json_message(&self, message: JsonValue, cb: Box<Fn(JsonValue, &WhatsappWebConnection<H>) + Send>) {
@@ -370,8 +369,8 @@ impl<H: WhatsappWebHandler<H> + Send + Sync> WhatsappWebConnection<H> {
         let mut inner = self.inner.lock().unwrap();
         inner.websocket_state = WebsocketState::Disconnected;
 
-        inner.session_state = match &inner.session_state {
-            &SessionState::Established { ref persistent_session } => {
+        inner.session_state = match inner.session_state {
+            SessionState::Established { ref persistent_session } => {
                 SessionState::PendingPersistent { persistent_session: persistent_session.clone() }
             }
             _ => return
@@ -382,7 +381,7 @@ impl<H: WhatsappWebHandler<H> + Send + Sync> WhatsappWebConnection<H> {
         self.handler.on_state_changed(self, State::Reconnecting);
     }
 
-    fn ws_on_message(&self, message: Message) {
+    fn ws_on_message(&self, message: &Message) {
         trace!("received websocket message {:?}", message);
         let mut inner = self.inner.lock().unwrap();
         if let WebsocketState::Connected(ref out, ref mut timeout_manager) = inner.websocket_state {
@@ -390,7 +389,7 @@ impl<H: WhatsappWebHandler<H> + Send + Sync> WhatsappWebConnection<H> {
         } else {
             return;
         }
-        let message = WebsocketMessage::deserialize(&message).unwrap();
+        let message = WebsocketMessage::deserialize(message).unwrap();
 
 
         match message.payload {
@@ -558,12 +557,12 @@ impl<H: WhatsappWebHandler<H> + Send + Sync> WhatsappWebConnection<H> {
     pub fn send_message(&self, message_content: ChatMessageContent, jid: Jid) {
         let message_id = MessageId::generate();
 
-        let msg = AppMessage::MessagesEvents(Some(MessageEventType::Relay), vec![AppEvent::Message(WhatsappMessage {
+        let msg = AppMessage::MessagesEvents(Some(MessageEventType::Relay), vec![AppEvent::Message(Box::new(WhatsappMessage {
             content: message_content,
             time: Utc::now().naive_utc(),
             direction: Direction::Sending(jid),
             id: message_id.clone()
-        })]);
+        }))]);
         self.send_app_message(Some(message_id.0), WebsocketMessageMetric::Message, msg, Box::new(|_, _| {}));
     }
 
@@ -587,7 +586,7 @@ impl<H: WhatsappWebHandler<H> + Send + Sync> WhatsappWebConnection<H> {
         }));
     }
 
-    pub fn request_file_upload(&self, hash: &[u8], media_type: MediaType, callback: Box<Fn(Result<&str, ()>) + Send + Sync>) {
+    pub fn request_file_upload(&self, hash: &[u8], media_type: MediaType, callback: Box<Fn(Result<&str>) + Send + Sync>) {
         self.send_json_message(json_protocol::build_file_upload_request(hash, media_type), Box::new(move |response, _| {
             callback(json_protocol::parse_file_upload_response(&response));
         }));
@@ -612,7 +611,7 @@ impl<H: WhatsappWebHandler<H> + Send + Sync> WhatsappWebConnection<H> {
         }));
     }
 
-    fn ws_connect(&self) {
+    fn ws_connect(&self) -> JoinHandle<()> {
         let whatsapp_connection = self.clone();
         thread::spawn(move || loop {
             let last_try = SystemTime::now();
@@ -624,23 +623,25 @@ impl<H: WhatsappWebHandler<H> + Send + Sync> WhatsappWebConnection<H> {
                 }
             }).unwrap();
 
-            match whatsapp_connection.inner.lock().unwrap().session_state {
-                SessionState::Teardown => break,
-                _ => {}
+            if let SessionState::Teardown = whatsapp_connection.inner.lock().unwrap().session_state {
+                break
             }
-            let duration = SystemTime::now().duration_since(last_try).unwrap_or(Duration::new(0, 0));
-            Duration::new(10, 0).checked_sub(duration).map(|duration| thread::sleep(duration));
-        }).join().unwrap();
+            let duration = SystemTime::now().duration_since(last_try).unwrap_or_else(|_|Duration::new(0, 0));
+            if let Some(duration) = Duration::new(10, 0).checked_sub(duration) { 
+                thread::sleep(duration);
+            }
+        })
     }
 
     pub fn ws_disconnect(&self) {
         self.handler.on_state_changed(self, State::Disconnecting);
         let mut inner = self.inner.lock().unwrap();
         inner.session_state = SessionState::Teardown;
-        if let WebsocketState::Connected(ref out, ref timeout_manager) = inner.websocket_state {
-            out.close(CloseCode::Normal).unwrap();
+        if let WebsocketState::Connected(ref out, ref mut timeout_manager) = inner.websocket_state {
+            out.close(CloseCode::Normal).ok();
+            timeout_manager.disarm();
         }
-//TODO
+
     }
 
     pub fn subscribe_presence(&self, jid: &Jid) {
@@ -666,13 +667,13 @@ impl<H: WhatsappWebHandler<H> + Send + Sync + 'static> Handler for WsHandler<H> 
     fn build_request(&mut self, url: &Url) -> ws::Result<Request> {
         trace!("Handler is building request to {}.", url);
         let mut request = Request::from_url(url)?;
-        request.headers_mut().push(("Origin".to_string(), "https://web.whatsapp.com".as_bytes().to_vec()));
+        request.headers_mut().push(("Origin".to_string(), b"https://web.whatsapp.com".to_vec()));
         Ok(request)
     }
 
     fn on_message(&mut self, msg: Message) -> ws::Result<()> {
         debug!("Received message {:?}", msg);
-        self.whatsapp_connection.ws_on_message(msg);
+        self.whatsapp_connection.ws_on_message(&msg);
         Ok(())
     }
     fn on_timeout(&mut self, event: Token) -> ws::Result<()> {
@@ -705,18 +706,18 @@ pub struct PersistentSession {
 const ENDPOINT_URL: &str = "wss://w7.web.whatsapp.com/ws";
 
 
-pub fn new<Q: Fn(QrCode) + Send + 'static, H: WhatsappWebHandler<H> + Send + Sync + 'static>(qr_cb: Q, handler: H) -> WhatsappWebConnection<H> {
+pub fn new<Q: Fn(QrCode) + Send + 'static, H: WhatsappWebHandler<H> + Send + Sync + 'static>(qr_cb: Q, handler: H) -> (WhatsappWebConnection<H>, JoinHandle<()>) {
     let whatsapp_connection = WhatsappWebConnection::new(Box::new(qr_cb), handler);
 
-    whatsapp_connection.ws_connect();
+    let join_handle = whatsapp_connection.ws_connect();
 
-    whatsapp_connection
+    (whatsapp_connection, join_handle)
 }
 
-pub fn with_persistent_session<H: WhatsappWebHandler<H> + Send + Sync + 'static>(persistent_session: PersistentSession, handler: H) -> WhatsappWebConnection<H> {
+pub fn with_persistent_session<H: WhatsappWebHandler<H> + Send + Sync + 'static>(persistent_session: PersistentSession, handler: H) -> (WhatsappWebConnection<H>, JoinHandle<()>) {
     let whatsapp_connection = WhatsappWebConnection::with_persistent_session(persistent_session, handler);
 
-    whatsapp_connection.ws_connect();
+    let join_handle = whatsapp_connection.ws_connect();
 
-    whatsapp_connection
+    (whatsapp_connection, join_handle)
 }

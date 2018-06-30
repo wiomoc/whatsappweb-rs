@@ -1,7 +1,12 @@
+use std::str::FromStr;
+
 use json::JsonValue;
 use base64;
+
 use super::{Jid, PresenceStatus, GroupMetadata, GroupParticipantsChange, MediaType};
 use message::MessageAckLevel;
+use errors::*;
+
 
 #[derive(Debug)]
 pub enum ServerMessage<'a> {
@@ -21,38 +26,38 @@ pub enum ServerMessage<'a> {
 
 impl<'a> ServerMessage<'a> {
     #[inline]
-    pub fn deserialize(json: &'a JsonValue) -> Result<ServerMessage<'a>, ()> {
-        let opcode = json[0].as_str().ok_or(())?;
+    pub fn deserialize(json: &'a JsonValue) -> Result<ServerMessage<'a>> {
+        let opcode = json[0].as_str().ok_or("server message without opcode")?;
         let payload = &json[1];
 
         Ok(match opcode {
             "Conn" => {
                 ServerMessage::ConnectionAck {
-                    user_jid: payload["wid"].as_str().and_then(|jid| Jid::from_str(jid).ok()).ok_or(())?,
-                    server_token: payload["serverToken"].as_str().ok_or(())?,
-                    client_token: payload["clientToken"].as_str().ok_or(())?,
+                    user_jid: payload.get_str("wid").and_then(|jid| Jid::from_str(jid))?,
+                    server_token: payload.get_str("serverToken")?,
+                    client_token: payload.get_str("clientToken")?,
                     secret: payload["secret"].as_str()
                 }
             }
             "Cmd" => {
-                let cmd_type = payload["type"].as_str().ok_or(())?;
+                let cmd_type = payload.get_str("type")?;
                 match cmd_type {
                     "challenge" => {
-                        ServerMessage::ChallengeRequest(base64::decode(&payload["challenge"].as_str().ok_or(())?).map_err(|_| ())?)
+                        ServerMessage::ChallengeRequest(base64::decode(&payload.get_str("challenge")?)?)
                     }
                     "disconnect" => {
                         ServerMessage::Disconnect(payload["kind"].as_str())
                     }
                     "picture" => {
-                        ServerMessage::PictureChange { jid: Jid::from_str(payload["jid"].as_str().ok_or(())?)?, removed: payload["tag"] == "removed" }
+                        ServerMessage::PictureChange { jid: Jid::from_str(payload.get_str("jid")?)?, removed: payload["tag"] == "removed" }
                     }
-                    _ => return Err(())
+                    _ => bail! { "invalid or unsupported 'Cmd' subcommand type {}", cmd_type}
                 }
             }
             "Chat" => {
-                let chat = Jid::from_str(payload["id"].as_str().ok_or(())?)?;
+                let chat = Jid::from_str(payload.get_str("id")?)?;
                 let data = &payload["data"];
-                let cmd_type = data[0].as_str().ok_or(())?;
+                let cmd_type = data[0].as_str().ok_or("chat command without subcommand")?;
                 let inducer = data[1].as_str().and_then(|jid| Jid::from_str(jid).ok());
                 match cmd_type {
                     typ @ "introduce" | typ @ "create" => {
@@ -63,23 +68,23 @@ impl<'a> ServerMessage<'a> {
                         let mut participants = Vec::with_capacity(admins_json.len() + regulars_json.len());
 
                         for participant in admins_json.members() {
-                            participants.push((Jid::from_str(participant.as_str().ok_or(())?)?, true));
+                            participants.push((Jid::from_str(participant.as_str().ok_or("not a string")?)?, true));
                         }
 
                         for participant in regulars_json.members() {
-                            participants.push((Jid::from_str(participant.as_str().ok_or(())?)?, false));
+                            participants.push((Jid::from_str(participant.as_str().ok_or("not a string")?)?, false));
                         }
 
                         ServerMessage::GroupIntroduce {
-                            inducer: inducer.ok_or(())?,
+                            inducer: inducer.ok_or("missing inducer")?,
                             newly_created: typ == "create",
                             meta: GroupMetadata {
                                 id: chat,
                                 owner: None,
-                                creation_time: group_metadata_json["creation"].as_i64().ok_or(())?,
-                                subject: group_metadata_json["subject"].as_str().ok_or(())?.to_string(),
-                                subject_owner: Jid::from_str(group_metadata_json["s_o"].as_str().ok_or(())?)?,
-                                subject_time: group_metadata_json["s_t"].as_i64().ok_or(())?,
+                                creation_time: group_metadata_json.get_i64("creation")?,
+                                subject: group_metadata_json.get_str("subject")?.to_string(),
+                                subject_owner: Jid::from_str(group_metadata_json.get_str("s_o")?)?,
+                                subject_time: group_metadata_json.get_i64("s_t")?,
                                 participants
                             }
                         }
@@ -88,7 +93,7 @@ impl<'a> ServerMessage<'a> {
                         let participants_json = &data[2]["participants"];
                         let mut participants = Vec::with_capacity(participants_json.len());
                         for participant in participants_json.members() {
-                            participants.push(Jid::from_str(participant.as_str().ok_or(())?)?)
+                            participants.push(Jid::from_str(participant.as_str().ok_or("not a string")?)?)
                         }
                         ServerMessage::GroupParticipantsChange {
                             inducer,
@@ -100,114 +105,114 @@ impl<'a> ServerMessage<'a> {
                     "subject" => {
                         let subject_json = &data[2];
                         ServerMessage::GroupSubjectChange {
-                            subject_owner: inducer.ok_or(())?,
+                            subject_owner: inducer.ok_or("missing inducer")?,
                             group: chat,
-                            subject: subject_json["subject"].as_str().ok_or(())?.to_string(),
-                            subject_time: subject_json["s_t"].as_i64().ok_or(())?
+                            subject: subject_json.get_str("subject")?.to_string(),
+                            subject_time: subject_json.get_i64("s_t")?
                         }
                     }
-                    _ => return Err(())
+                    _ => bail! { "invalid or unsupported 'Chat' subcommand type {}", cmd_type}
                 }
             }
             "Msg" | "MsgInfo" => {
-                let cmd_type = payload["cmd"].as_str().ok_or(())?;
+                let cmd_type = payload.get_str("cmd")?;
                 match cmd_type {
                     "ack" => ServerMessage::MessageAck {
-                        message_id: payload["id"].as_str().ok_or(())?,
-                        sender: Jid::from_str(payload["from"].as_str().ok_or(())?)?,
-                        receiver: Jid::from_str(payload["to"].as_str().ok_or(())?)?,
+                        message_id: payload.get_str("id")?,
+                        sender: Jid::from_str(payload.get_str("from")?)?,
+                        receiver: Jid::from_str(payload.get_str("to")?)?,
                         participant: payload["participant"].as_str().and_then(|jid| Jid::from_str(jid).ok()),
-                        time: payload["t"].as_i64().ok_or(())?,
-                        level: MessageAckLevel::from_json(payload["ack"].as_u8().ok_or(())?)?
+                        time: payload.get_i64("t")?,
+                        level: MessageAckLevel::from_json(payload.get_u8("ack")?)?
                     },
                     "acks" => ServerMessage::MessageAcks {
                         message_ids: payload["id"].members().map(|id| id.as_str().unwrap()).collect(),
-                        sender: Jid::from_str(payload["from"].as_str().ok_or(())?)?,
-                        receiver: Jid::from_str(payload["to"].as_str().ok_or(())?)?,
+                        sender: Jid::from_str(payload.get_str("from")?)?,
+                        receiver: Jid::from_str(payload.get_str("to")?)?,
                         participant: payload["participant"].as_str().and_then(|jid| Jid::from_str(jid).ok()),
-                        time: payload["t"].as_i64().ok_or(())?,
-                        level: MessageAckLevel::from_json(payload["ack"].as_u8().ok_or(())?)?
+                        time: payload.get_i64("t")?,
+                        level: MessageAckLevel::from_json(payload.get_u8("ack")?)?
                     },
-                    _ => return Err(())
+                    _ => bail! { "invalid or unsupported 'Msg' or 'MsgInfo' subcommand type {}", cmd_type}
                 }
             }
             "Presence" => {
                 ServerMessage::PresenceChange {
-                    jid: Jid::from_str(payload["id"].as_str().ok_or(())?)?,
-                    status: PresenceStatus::from_json(payload["type"].as_str().ok_or(())?)?,
+                    jid: Jid::from_str(payload.get_str("id")?)?,
+                    status: PresenceStatus::from_json(payload.get_str("type")?)?,
                     time: payload["t"].as_i64()
                 }
             }
             "Status" => {
-                ServerMessage::StatusChange(Jid::from_str(payload["id"].as_str().ok_or(())?)?, payload["status"].as_str().ok_or(())?.to_string())
+                ServerMessage::StatusChange(Jid::from_str(payload.get_str("id")?)?, payload.get_str("status")?.to_string())
             }
-            _ => return Err(())
+            _ => bail! { "invalid or unsupported opcode {}", opcode}
         })
     }
 }
 
 impl MessageAckLevel {
-    fn from_json(value: u8) -> Result<MessageAckLevel, ()> {
+    fn from_json(value: u8) -> Result<MessageAckLevel> {
         Ok(match value {
             0 => MessageAckLevel::PendingSend,
             1 => MessageAckLevel::Send,
             2 => MessageAckLevel::Received,
             3 => MessageAckLevel::Read,
             4 => MessageAckLevel::Played,
-            _ => return Err(())
+            _ => bail! {"Invalid message ack level {}", value}
         })
     }
 }
 
 impl PresenceStatus {
-    fn from_json(value: &str) -> Result<PresenceStatus, ()> {
+    fn from_json(value: &str) -> Result<PresenceStatus> {
         Ok(match value {
             "unavailable" => PresenceStatus::Unavailable,
             "available" => PresenceStatus::Available,
             "composing" => PresenceStatus::Typing,
             "recording" => PresenceStatus::Recording,
-            _ => return Err(())
+            _ => bail! {"Invalid presence status {}", value}
         })
     }
 }
 
 impl GroupMetadata {
-    fn from_json(value: &JsonValue) -> Result<GroupMetadata, ()> {
+    fn from_json(value: &JsonValue) -> Result<GroupMetadata> {
         let participants_json = &value["participants"];
         let mut participants = Vec::with_capacity(participants_json.len());
         for participant in participants_json.members() {
-            participants.push((Jid::from_str(participant["id"].as_str().ok_or(())?)?, participant["isAdmin"].as_bool().ok_or(())?));
+            participants.push((Jid::from_str(participant.get_str("id")?)?, participant.get_bool("isAdmin")?));
         }
 
         Ok(GroupMetadata {
-            id: Jid::from_str(value["id"].as_str().ok_or(())?)?,
-            creation_time: value["creation"].as_i64().ok_or(())?,
-            owner: Some(Jid::from_str(value["owner"].as_str().ok_or(())?)?),
+            id: Jid::from_str(value.get_str("id")?)?,
+            creation_time: value.get_i64("creation")?,
+            owner: Some(Jid::from_str(value.get_str("owner")?)?),
             participants,
-            subject: value["subject"].as_str().ok_or(())?.to_string(),
-            subject_time: value["subjectTime"].as_i64().ok_or(())?,
-            subject_owner: Jid::from_str(value["subjectOwner"].as_str().ok_or(())?)?
+            subject: value.get_str("subject")?.to_string(),
+            subject_time: value.get_i64("subjectTime")?,
+            subject_owner: Jid::from_str(value.get_str("subjectOwner")?)?
         })
     }
 }
 
 impl GroupParticipantsChange {
-    fn from_json(value: &str) -> Result<GroupParticipantsChange, ()> {
+    fn from_json(value: &str) -> Result<GroupParticipantsChange> {
         Ok(match value {
             "add" => GroupParticipantsChange::Add,
             "remove" => GroupParticipantsChange::Remove,
             "promote" => GroupParticipantsChange::Promote,
             "demote" => GroupParticipantsChange::Demote,
-            _ => return Err(())
+            _ => bail! {"invalid group command {}", value}
         })
     }
 }
 
-pub fn parse_response_status(response: &JsonValue) -> Result<(), u16> {
+pub fn parse_response_status(response: &JsonValue) -> Result<()> {
     response["status"].as_u16().map_or(Ok(()), |status_code| if status_code == 200 {
         Ok(())
     } else {
-        Err(status_code)
+        bail! {"received status code {}", status_code}
     })
 }
 
@@ -215,9 +220,9 @@ pub fn build_init_request(client_id: &str) -> JsonValue {
     array!["admin", "init", array![0, 2, 9457], array!["ww-rs", "ww-rs"], client_id, true]
 }
 
-pub fn parse_init_response<'a>(response: &'a JsonValue) -> Result<&'a str, ()> {
-    parse_response_status(response).map_err(|_| ())?;
-    response["ref"].as_str().ok_or(())
+pub fn parse_init_response<'a>(response: &'a JsonValue) -> Result<&'a str> {
+    parse_response_status(response)?;
+    response.get_str("ref")
 }
 
 pub fn build_takeover_request(client_token: &str, server_token: &str, client_id: &str) -> JsonValue {
@@ -241,16 +246,16 @@ pub fn build_file_upload_request(hash: &[u8], media_type: MediaType) -> JsonValu
     }, base64::encode(hash)]
 }
 
-pub fn parse_file_upload_response<'a>(response: &'a JsonValue) -> Result<&'a str, ()> {
-    parse_response_status(response).map_err(|_| ())?;
-    response["url"].as_str().ok_or(())
+pub fn parse_file_upload_response<'a>(response: &'a JsonValue) -> Result<&'a str> {
+    parse_response_status(response)?;
+    response.get_str("url")
 }
 
 pub fn build_profile_picture_request(jid: &Jid) -> JsonValue {
     array!["query", "ProfilePicThumb", jid.to_string()]
 }
 
-pub fn parse_profile_picture_response<'a>(response: &'a JsonValue) -> Option<&'a str> {
+pub fn parse_profile_picture_response(response: &JsonValue) -> Option<&str> {
     response["eurl"].as_str()
 }
 
@@ -258,7 +263,7 @@ pub fn build_profile_status_request(jid: &Jid) -> JsonValue {
     array!["query", "Status", jid.to_string()]
 }
 
-pub fn parse_profile_status_response<'a>(response: &'a JsonValue) -> Option<&'a str> {
+pub fn parse_profile_status_response(response: &JsonValue) -> Option<&str> {
     response["status"].as_str()
 }
 
@@ -266,7 +271,32 @@ pub fn build_group_metadata_request(jid: &Jid) -> JsonValue {
     array!["query", "GroupMetadata", jid.to_string()]
 }
 
-pub fn parse_group_metadata_response<'a>(response: &'a JsonValue) -> Result<GroupMetadata, ()> {
-    parse_response_status(response).map_err(|_| ())?;
+pub fn parse_group_metadata_response(response: &JsonValue) -> Result<GroupMetadata> {
+    parse_response_status(response)?;
     GroupMetadata::from_json(response)
+}
+
+pub trait JsonNonNull {
+    fn get_str(&self, field: &'static str) -> Result<&str>;
+    fn get_i64<'a>(&'a self, field: &'static str) -> Result<i64>;
+    fn get_u8<'a>(&'a self, field: &'static str) -> Result<u8>;
+    fn get_bool<'a>(&'a self, field: &'static str) -> Result<bool>;
+}
+
+impl JsonNonNull for JsonValue {
+    fn get_str<'a>(&'a self, field: &'static str) -> Result<&'a str> {
+        self[field].as_str().ok_or_else(|| ErrorKind::JsonFieldMissing(field).into())
+    }
+
+    fn get_i64<'a>(&'a self, field: &'static str) -> Result<i64> {
+        self[field].as_i64().ok_or_else(|| ErrorKind::JsonFieldMissing(field).into())
+    }
+
+    fn get_u8<'a>(&'a self, field: &'static str) -> Result<u8> {
+        self[field].as_u8().ok_or_else(|| ErrorKind::JsonFieldMissing(field).into())
+    }
+
+    fn get_bool<'a>(&'a self, field: &'static str) -> Result<bool> {
+        self[field].as_bool().ok_or_else(|| ErrorKind::JsonFieldMissing(field).into())
+    }
 }

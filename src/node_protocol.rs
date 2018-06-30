@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use Contact;
 use Jid;
 use Chat;
@@ -6,7 +8,7 @@ use PresenceStatus;
 use GroupParticipantsChange;
 use node_wire::{Node, NodeContent, IntoCow};
 use message::{ChatMessage, MessageAck, MessageAckLevel, Peer, MessageId};
-use std::collections::HashMap;
+use errors::*;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum MessageEventType {
@@ -21,12 +23,13 @@ pub enum GroupCommand {
     Create(String),
     ParticipantsChange(Jid, GroupParticipantsChange),
     //TODO
+    #[allow(dead_code)]
     Leave(Jid)
 }
 
 #[derive(Debug)]
 pub enum AppEvent {
-    Message(ChatMessage),
+    Message(Box<ChatMessage>),
 
     MessageAck(MessageAck),
     // App only
@@ -75,32 +78,32 @@ pub enum AppMessage {
 
 
 impl AppMessage {
-    pub fn deserialize(root_node: Node) -> Result<AppMessage, ()> {
-        let event_type = root_node.get_attribute("add").and_then(|add| MessageEventType::from_node(add.as_str()).ok());
+    pub fn deserialize(root_node: Node) -> Result<AppMessage> {
+        let event_type = root_node.get_attribute("add").and_then(|add| MessageEventType::from_node(add.as_str())).ok();
         match root_node.desc() {
             "action" => {
                 if let NodeContent::List(list) = root_node.content {
                     let mut app_events = Vec::with_capacity(list.len());
-                    for mut node in list.into_iter() {
+                    for mut node in list {
                         match node.desc() {
                             "message" => {
                                 if let NodeContent::Binary(ref content) = node.content {
-                                    app_events.push(AppEvent::Message(ChatMessage::from_proto(content)?));
+                                    app_events.push(AppEvent::Message(Box::new(ChatMessage::from_proto(content)?)));
                                 } else {
-                                    return Err(());
+                                    bail!{ "invalid nodetype for chatmessage" }
                                 }
                             }
                             "received" => {
                                 app_events.push(AppEvent::MessageAck(
-                                    MessageAck::from_app_message(MessageId(node.take_attribute("index").ok_or(())?.into_string()),
-                                                                 MessageAckLevel::from_node(node.get_attribute("type").ok_or(())?.as_str())?,
-                                                                 node.take_attribute("jid").ok_or(())?.into_jid().ok_or(())?,
-                                                                 node.take_attribute("participant").and_then(|participant| participant.into_jid()),
-                                                                 node.take_attribute("owner").ok_or(())?.as_str().parse().map_err(|_| ())?)))
+                                    MessageAck::from_app_message(MessageId(node.take_attribute("index")?.into_string()),
+                                                                 MessageAckLevel::from_node(node.get_attribute("type")?.as_str())?,
+                                                                 node.take_attribute("jid")?.into_jid()?,
+                                                                 node.take_attribute("participant").and_then(|participant| participant.into_jid()).ok(),
+                                                                 node.take_attribute("owner")?.as_str().parse().map_err(|_| "NAN")?)))
                             }
                             "read" => {
-                                let jid = node.take_attribute("jid").ok_or(())?.into_jid().ok_or(())?;
-                                app_events.push(AppEvent::ChatAction(jid, if node.take_attribute("type").map_or(true, |typ| typ.as_str() != "false") {
+                                let jid = node.take_attribute("jid")?.into_jid()?;
+                                app_events.push(AppEvent::ChatAction(jid, if node.take_attribute("type").ok().map_or(true, |typ| typ.as_str() != "false") {
                                     ChatAction::Read
                                 } else {
                                     ChatAction::Unread
@@ -115,12 +118,12 @@ impl AppMessage {
                                 })
                             }
                             "chat" => {
-                                let jid = node.take_attribute("jid").ok_or(())?.into_jid().ok_or(())?;
+                                let jid = node.take_attribute("jid")?.into_jid()?;
                                 let action = ChatAction::from_node(&mut node)?;
                                 app_events.push(AppEvent::ChatAction(jid, action));
                             }
                             "battery" => {
-                                let level = node.take_attribute("value").ok_or(())?.as_str().parse().map_err(|_| ())?;
+                                let level = node.take_attribute("value")?.as_str().parse().map_err(|_| "NAN")?;
                                 app_events.push(AppEvent::Battery(level));
                             }
                             _ => {}
@@ -129,39 +132,39 @@ impl AppMessage {
 
                     Ok(AppMessage::MessagesEvents(event_type, app_events))
                 } else {
-                    Err(())
+                    bail!{ "invalid or unsupported action type"}
                 }
             }
             "response" => {
-                match root_node.get_attribute("type").ok_or(())?.as_str() {
+                match root_node.get_attribute("type")?.as_str() {
                     "contacts" => {
                         if let NodeContent::List(mut list) = root_node.content {
                             let mut contacts = Vec::with_capacity(list.len());
-                            for mut node in list.into_iter() {
+                            for mut node in list {
                                 contacts.push(Contact::parse_node(&mut node)?);
                             }
 
                             Ok(AppMessage::Contacts(contacts))
                         } else {
-                            Err(())
+                            bail!{ "Invalid nodetype for contacts"}
                         }
                     }
                     "chat" => {
                         if let NodeContent::List(mut list) = root_node.content {
                             let mut chats = Vec::with_capacity(list.len());
-                            for mut node in list.into_iter() {
+                            for mut node in list {
                                 chats.push(Chat::parse_node(&mut node)?);
                             }
 
                             Ok(AppMessage::Chats(chats))
                         } else {
-                            Err(())
+                            bail!{ "Invalid nodetype for chats"}
                         }
                     }
-                    _ => Err(())
+                    _ =>  bail!{ "invalid or unsupported 'response' type"}
                 }
             }
-            _ => Err(())
+            _ => bail!{ "invalid or unsupported app message type"}
         }
     }
     pub fn serialize(self, epoch: u32) -> Node {
@@ -327,60 +330,60 @@ impl AppMessage {
     }
 }
 
-pub fn parse_message_response(root_node: Node) -> Result<Vec<ChatMessage>, ()> {
-    if root_node.desc() == "response" && root_node.get_attribute("type").map_or(false, |typ| typ.as_str() == "message") {
+pub fn parse_message_response(root_node: Node) -> Result<Vec<ChatMessage>> {
+    if root_node.desc() == "response" && root_node.get_attribute("type").ok().map_or(false, |typ| typ.as_str() == "message") {
         if let NodeContent::List(nodes) = root_node.content {
             let mut messages = Vec::with_capacity(nodes.len());
             for node in nodes {
                 if let NodeContent::Binary(ref content) = node.content {
                     messages.push(ChatMessage::from_proto(content)?);
                 } else {
-                    return Err(());
+                    bail!{ "invalid nodetype for chatmessage" }
                 }
             }
             Ok(messages)
         } else {
-            Err(())
+            bail!{ "invalid nodetype for chatmessage" }
         }
     } else {
-        Err(())
+        bail!{ "invalid response" }
     }
 }
 
 impl Contact {
-    fn parse_node(node: &mut Node) -> Result<Contact, ()> {
+    fn parse_node(node: &mut Node) -> Result<Contact> {
         Ok(Contact {
-            name: node.take_attribute("name").map(|name| name.into_string()),
-            notify: node.take_attribute("notify").map(|notify| notify.into_string()),
-            jid: node.take_attribute("jid").ok_or(())?.into_jid().ok_or(())?
+            name: node.take_attribute("name").map(|name| name.into_string()).ok(),
+            notify: node.take_attribute("notify").map(|notify| notify.into_string()).ok(),
+            jid: node.take_attribute("jid")?.into_jid()?
         })
     }
 }
 
 impl Chat {
-    fn parse_node(node: &mut Node) -> Result<Chat, ()> {
+    fn parse_node(node: &mut Node) -> Result<Chat> {
         Ok(Chat {
-            name: node.take_attribute("name").map(|name| name.into_string()),
-            jid: node.take_attribute("jid").ok_or(())?.into_jid().ok_or(())?,
-            last_activity: node.take_attribute("t").ok_or(())?.into_string().parse().map_err(|_| ())?,
-            spam: node.take_attribute("spam").ok_or(())?.into_string().parse().map_err(|_| ())?,
-            mute_until: node.take_attribute("mute").and_then(|t| t.into_string().parse().ok()),
-            pin_time: node.take_attribute("pin").and_then(|t| t.into_string().parse().ok()),
-            read_only: node.take_attribute("read_only").and_then(|read_only| read_only.into_string().parse().ok()).unwrap_or(false),
+            name: node.take_attribute("name").map(|name| name.into_string()).ok(),
+            jid: node.take_attribute("jid")?.into_jid()?,
+            last_activity: node.take_attribute("t")?.into_string().parse().map_err(|_| "NAN")?,
+            spam: node.take_attribute("spam")?.into_string().parse().map_err(|_| "NAN")?,
+            mute_until: node.take_attribute("mute").ok().and_then(|t| t.into_string().parse().ok()),
+            pin_time: node.take_attribute("pin").ok().and_then(|t| t.into_string().parse().ok()),
+            read_only: node.take_attribute("read_only").ok().and_then(|read_only| read_only.into_string().parse().ok()).unwrap_or(false),
         })
     }
 }
 
 impl MessageAckLevel {
-    fn from_node(value: &str) -> Result<MessageAckLevel, ()> {
+    fn from_node(value: &str) -> Result<MessageAckLevel> {
         Ok(match value {
             "message" => MessageAckLevel::Received,
             "played" => MessageAckLevel::Played,
             "read" => MessageAckLevel::Read,
-            _ => return Err(())
+            _ => bail!{"invalid message ack level {}", value}
         })
     }
-
+    #[allow(dead_code)]
     fn to_node(self) -> &'static str {
         match self {
             MessageAckLevel::Received => "message",
@@ -392,13 +395,13 @@ impl MessageAckLevel {
 }
 
 impl MessageEventType {
-    fn from_node(value: &str) -> Result<MessageEventType, ()> {
+    fn from_node(value: &str) -> Result<MessageEventType> {
         Ok(match value {
             "last" => MessageEventType::Last,
             "before" => MessageEventType::Before,
             "relay" => MessageEventType::Relay,
             "set" => MessageEventType::Set,
-            _ => return Err(())
+            _ => bail!{"invalid message event type {}", value}
         })
     }
 }
@@ -415,28 +418,28 @@ impl MessageEventType {
 }
 
 impl ChatAction {
-    fn from_node(node: &mut Node) -> Result<ChatAction, ()> {
-        Ok(match node.take_attribute("type").ok_or(())?.as_str() {
+    fn from_node(node: &mut Node) -> Result<ChatAction> {
+        Ok(match node.take_attribute("type")?.as_str() {
             "spam" => ChatAction::Add,
             "delete" => ChatAction::Remove,
             "archive" => ChatAction::Archive,
             "unarchive" => ChatAction::Unarchive,
             "clear" => ChatAction::Clear,
             "pin" => {
-                if let Some(time) = node.take_attribute("pin") {
-                    ChatAction::Pin(time.as_str().parse().map_err(|_| ())?)
+                if let Ok(time) = node.take_attribute("pin") {
+                    ChatAction::Pin(time.as_str().parse().map_err(|_| "NAN")?)
                 } else {
                     ChatAction::Unpin
                 }
             }
             "mute" => {
-                if let Some(time) = node.take_attribute("mute") {
-                    ChatAction::Mute(time.as_str().parse().map_err(|_| ())?)
+                if let Ok(time) = node.take_attribute("mute") {
+                    ChatAction::Mute(time.as_str().parse().map_err(|_| "NAN")?)
                 } else {
                     ChatAction::Unmute
                 }
             }
-            _ => return Err(())
+            _ => bail!{ "invalid or unsupported chat action type"}
         })
     }
 }

@@ -16,9 +16,9 @@ use image::Luma;
 
 use whatsappweb::connection::*;
 use whatsappweb::{Jid, Contact, PresenceStatus, GroupParticipantsChange, ChatAction, MediaType};
-use whatsappweb::message::{MessageAck, MessageAckSide, MessageAckLevel, Direction, Peer, ChatMessageContent};
+use whatsappweb::message::{MessageAck, MessageAckSide, MessageAckLevel, Direction, Peer, ChatMessageContent, ChatMessage};
 use whatsappweb::crypto;
-use whatsappweb::media_upload;
+use whatsappweb::media;
 
 
 const SESSION_FILENAME: &str = "session.bin";
@@ -45,8 +45,8 @@ impl WhatsappWebHandler for Handler {
             _ => {}
         }
     }
-    fn on_message(&self, connection: &WhatsappWebConnection<Handler>, message_new: bool, message: whatsappweb::message::ChatMessage) {
-        if !message_new {
+    fn on_message(&self, connection: &WhatsappWebConnection<Handler>, message_new: bool, message: Box<ChatMessage>) {
+        if !message_new {‚
             return;
         }
 

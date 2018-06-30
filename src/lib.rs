@@ -16,10 +16,13 @@ extern crate bincode;
 extern crate protobuf;
 extern crate byteorder;
 extern crate chrono;
+#[macro_use]
+extern crate error_chain;
+extern crate reqwest;
 
 pub mod connection;
 pub mod message;
-pub mod media_upload;
+pub mod media;
 mod message_wire;
 mod node_protocol;
 mod node_wire;
@@ -27,6 +30,12 @@ mod json_protocol;
 mod websocket_protocol;
 pub mod crypto;
 mod timeout;
+pub mod errors;
+
+use std::str::FromStr;
+
+use errors::*;
+
 
 #[derive(Debug, Clone, PartialOrd, PartialEq)]
 pub struct Jid {
@@ -35,26 +44,8 @@ pub struct Jid {
 }
 
 impl Jid {
-    pub fn from_str(jid: &str) -> Result<Jid, ()> {
-        let at = jid.find('@').ok_or(())?;
-
-        let (id, surfix) = jid.split_at(at);
-        Ok(Jid {
-            id: id.to_string(),
-            is_group: match surfix {
-                "@c.us" => false,
-                "@g.us" => true,
-                "@s.whatsapp.net" => false,
-                _ => return Err(())
-            }
-        })
-    }
-
     pub fn to_string(&self) -> String {
-        self.id.to_string() + match self.is_group {
-            true => "@g.us",
-            false => "@c.us"
-        }
+        self.id.to_string() + if self.is_group { "@g.us" } else { "@c.us" }
     }
 
     pub fn phone_number(&self) -> Option<String> {
@@ -63,6 +54,25 @@ impl Jid {
         } else {
             None
         }
+    }
+}
+
+impl FromStr for Jid {
+    type Err = Error;
+
+     fn from_str(jid: &str) -> Result<Jid> {
+        let at = jid.find('@').ok_or("jid missing @")?;
+
+        let (id, surfix) = jid.split_at(at);
+        Ok(Jid {
+            id: id.to_string(),
+            is_group: match surfix {
+                "@c.us" => false,
+                "@g.us" => true,
+                "@s.whatsapp.net" => false,
+                _ => return Err("invalid surfix".into())
+            }
+        })
     }
 }
 
