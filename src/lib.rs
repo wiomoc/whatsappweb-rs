@@ -40,27 +40,41 @@ use errors::*;
 #[derive(Debug, Clone, PartialOrd, PartialEq)]
 pub struct Jid {
     id: String,
-    pub is_group: bool
+    pub is_group: bool,
 }
 
+/// Jid used to identify either a group or an individual
 impl Jid {
     pub fn to_string(&self) -> String {
         self.id.to_string() + if self.is_group { "@g.us" } else { "@c.us" }
     }
 
-    pub fn phone_number(&self) -> Option<String> {
+    /// If the Jid is from an individual return the international phonenumber, else None
+    pub fn phonenumber(&self) -> Option<String> {
         if !self.is_group {
             Some("+".to_string() + &self.id)
         } else {
             None
         }
     }
+
+    pub fn from_phone_number(mut phonenumber: String) -> Result<Jid> {
+        if phonenumber.chars().next() == Some('+') {
+            phonenumber.remove(0);
+        }
+
+        if phonenumber.chars().find(|c| !c.is_digit(10)).is_some() {
+           return Err("not a valid phonenumber".into());
+        }
+
+        Ok(Jid { id: phonenumber, is_group: false })
+    }
 }
 
 impl FromStr for Jid {
     type Err = Error;
 
-     fn from_str(jid: &str) -> Result<Jid> {
+    fn from_str(jid: &str) -> Result<Jid> {
         let at = jid.find('@').ok_or("jid missing @")?;
 
         let (id, surfix) = jid.split_at(at);
@@ -71,16 +85,18 @@ impl FromStr for Jid {
                 "@g.us" => true,
                 "@s.whatsapp.net" => false,
                 _ => return Err("invalid surfix".into())
-            }
+            },
         })
     }
 }
 
 #[derive(Debug)]
 pub struct Contact {
+    ///name used in phonebook, set by user
     pub name: Option<String>,
+    ///name used in pushnotification, set by opposite peer
     pub notify: Option<String>,
-    pub jid: Jid
+    pub jid: Jid,
 }
 
 #[derive(Debug)]
@@ -91,7 +107,7 @@ pub struct Chat {
     pub pin_time: Option<i64>,
     pub mute_until: Option<i64>,
     pub spam: bool,
-    pub read_only: bool
+    pub read_only: bool,
 }
 
 
@@ -100,7 +116,7 @@ pub enum PresenceStatus {
     Unavailable,
     Available,
     Typing,
-    Recording
+    Recording,
 }
 
 #[derive(Debug)]
@@ -111,19 +127,19 @@ pub struct GroupMetadata {
     participants: Vec<(Jid, bool)>,
     subject: String,
     subject_owner: Jid,
-    subject_time: i64
+    subject_time: i64,
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum GroupParticipantsChange{
+pub enum GroupParticipantsChange {
     Add,
     Remove,
     Promote,
-    Demote
+    Demote,
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum ChatAction{
+pub enum ChatAction {
     Add,
     Remove,
     Archive,
@@ -134,7 +150,7 @@ pub enum ChatAction{
     Mute(i64),
     Unmute,
     Read,
-    Unread
+    Unread,
 }
 
 #[derive(Copy, Clone)]
@@ -142,5 +158,5 @@ pub enum MediaType {
     Image,
     Video,
     Audio,
-    Document
+    Document,
 }

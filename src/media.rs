@@ -33,7 +33,7 @@ pub fn generate_thumbnail_and_get_size(image: &[u8]) -> (Vec<u8>, (u32, u32)) {
     (thumbnail, size)
 }
 
-
+/// Download file from servers and decrypt it
 pub fn download_file<H>(file_info: FileInfo, media_type: MediaType, callback: Box<Fn(Result<Vec<u8>>) + Send + Sync>)
     where H: WhatsappWebHandler + Send + Sync + 'static {
     thread::spawn(move || {
@@ -47,6 +47,7 @@ pub fn download_file<H>(file_info: FileInfo, media_type: MediaType, callback: Bo
     });
 }
 
+/// Upload file to servers and encrypt it
 pub fn upload_file<H>(file: Vec<u8>, media_type: MediaType, connection: &WhatsappWebConnection<H>, callback: Box<Fn(Result<FileInfo>) + Send + Sync>)
     where H: WhatsappWebHandler + Send + Sync + 'static {
     let file_hash = crypto::sha256(&file);

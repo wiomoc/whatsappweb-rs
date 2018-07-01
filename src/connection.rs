@@ -58,16 +58,22 @@ pub enum DisconnectReason {
 
 #[derive(Debug)]
 pub enum UserData {
+    /// Contacts are initial send by the app
     ContactsInitial(Vec<Contact>),
+    /// Contact is added or changed
     ContactAddChange(Contact),
+    /// Contact is removed
     ContactDelete(Jid),
+    /// Chats are initial send by the app
     Chats(Vec<Chat>),
     ChatAction(Jid, ChatAction),
+    /// Jid of the own user
     UserJid(Jid),
     PresenceChange(Jid, PresenceStatus, Option<NaiveDateTime>),
     MessageAck(MessageAck),
     GroupIntroduce { newly_created: bool, inducer: Jid, meta: GroupMetadata },
     GroupParticipantsChange { group: Jid, change: GroupParticipantsChange, inducer: Option<Jid>, participants: Vec<Jid> },
+    /// Batterylevel which is submitted by the app
     Battery(u8)
 }
 
@@ -692,7 +698,7 @@ impl<H: WhatsappWebHandler<H> + Send + Sync + 'static> Handler for WsHandler<H> 
         self.whatsapp_connection.ws_on_disconnected();
     }
 }
-
+/// Stores the parameters to login without scanning the qrcode again.
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct PersistentSession {
     client_token: String,
@@ -705,7 +711,8 @@ pub struct PersistentSession {
 
 const ENDPOINT_URL: &str = "wss://w7.web.whatsapp.com/ws";
 
-
+/// Create new connection and session.
+/// Will eventual call ```qr_cb``` with the generated qr-code.
 pub fn new<Q: Fn(QrCode) + Send + 'static, H: WhatsappWebHandler<H> + Send + Sync + 'static>(qr_cb: Q, handler: H) -> (WhatsappWebConnection<H>, JoinHandle<()>) {
     let whatsapp_connection = WhatsappWebConnection::new(Box::new(qr_cb), handler);
 
@@ -714,6 +721,7 @@ pub fn new<Q: Fn(QrCode) + Send + 'static, H: WhatsappWebHandler<H> + Send + Syn
     (whatsapp_connection, join_handle)
 }
 
+/// Create new connection and restore the session with the given ```persistent_session```.
 pub fn with_persistent_session<H: WhatsappWebHandler<H> + Send + Sync + 'static>(persistent_session: PersistentSession, handler: H) -> (WhatsappWebConnection<H>, JoinHandle<()>) {
     let whatsapp_connection = WhatsappWebConnection::with_persistent_session(persistent_session, handler);
 

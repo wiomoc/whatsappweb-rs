@@ -11,8 +11,10 @@ extern crate base64;
 use std::fs::{File, OpenOptions, remove_file};
 use std::io::{Read, Write, Cursor};
 use std::sync::{RwLock, Arc};
-use image::Luma;
+use std::str::FromStr;
 
+
+use image::Luma;
 
 use whatsappweb::connection::*;
 use whatsappweb::{Jid, Contact, PresenceStatus, GroupParticipantsChange, ChatAction, MediaType};
@@ -46,9 +48,11 @@ impl WhatsappWebHandler for Handler {
         }
     }
     fn on_message(&self, connection: &WhatsappWebConnection<Handler>, message_new: bool, message: Box<ChatMessage>) {
-        if !message_new {‚
+        if !message_new {
             return;
         }
+
+        let message = *message;
 
         let accepted_jid = Jid::from_str("491234567@c.us").unwrap();
 
@@ -78,8 +82,10 @@ fn main() {
     let handler = Handler {};
 
     if let Ok(file) = File::open(SESSION_FILENAME) {
-        whatsappweb::connection::with_persistent_session(bincode::deserialize_from(file).unwrap(), handler);
+        let (_, join_handle) = whatsappweb::connection::with_persistent_session(bincode::deserialize_from(file).unwrap(), handler);
+        join_handle.join().unwrap();
     } else {
-        whatsappweb::connection::new(|qr| { qr.render::<Luma<u8>>().module_dimensions(10, 10).build().save("login_qr.png").unwrap(); }, handler);
+        let (_, join_handle) = whatsappweb::connection::new(|qr| { qr.render::<Luma<u8>>().module_dimensions(10, 10).build().save("login_qr.png").unwrap(); }, handler);
+        join_handle.join().unwrap();
     }
 }
