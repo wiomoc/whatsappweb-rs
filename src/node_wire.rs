@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::{Read, Write, Result, Cursor};
+use std::io::{Read, Write, Cursor};
 use std::char;
 use std::borrow::Cow;
 use std::ops::Deref;
@@ -7,8 +7,7 @@ use std::ops::Deref;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use Jid;
-use errors;
-use errors::{ResultExt, ErrorKind};
+use errors::*;
 
 const LIST_EMPTY: u8 = 0;
 #[allow(dead_code)]
@@ -60,7 +59,7 @@ pub enum NodeContent {
     Binary(Vec<u8>),
     Jid(Jid),
     Token(&'static str),
-    Nibble(Cow<'static, str>)
+    Nibble(Cow<'static, str>),
 }
 
 impl NodeContent {
@@ -88,7 +87,7 @@ impl NodeContent {
         }
     }
 
-    pub fn into_jid(self) -> errors::Result<Jid> {
+    pub fn into_jid(self) -> Result<Jid> {
         match self {
             NodeContent::Jid(jid) => Ok(jid),
             _ => bail! {"not a jid"}
@@ -112,22 +111,22 @@ impl NodeContent {
 pub struct Node {
     pub desc: Cow<'static, str>,
     pub attributes: HashMap<Cow<'static, str>, NodeContent>,
-    pub content: NodeContent
+    pub content: NodeContent,
 }
 
 fn read_list_size(tag: u8, stream: &mut Read) -> Result<u16> {
-    match tag {
-        LIST_EMPTY => Ok(0),
-        LIST_8 => Ok(u16::from(stream.read_u8()?)),
-        LIST_16 => stream.read_u16::<LittleEndian>(),
-        _ => Ok(0)
-    }
+    Ok(match tag {
+        LIST_EMPTY => 0,
+        LIST_8 => u16::from(stream.read_u8()?),
+        LIST_16 => stream.read_u16::<LittleEndian>()?,
+        _ => bail! {"Invalid listsize tag: {}", tag}
+    })
 }
 
 fn write_list_size(size: u16, stream: &mut Write) -> Result<()> {
     match size {
         0 => { stream.write_u8(LIST_EMPTY)?; }
-        1 ... 256 => {
+        1...256 => {
             stream.write_u8(LIST_8)?;
             stream.write_u8(size as u8)?;
         }
@@ -140,11 +139,11 @@ fn write_list_size(size: u16, stream: &mut Write) -> Result<()> {
 }
 
 fn read_list(tag: u8, stream: &mut Read) -> Result<Vec<Node>> {
-    let size = read_list_size(tag, stream)?;
+    let size = read_list_size(tag, stream).chain_err(|| "Couldn't read list size")?;
     let mut list = Vec::<Node>::with_capacity(size as usize);
 
-    for _ in 0..size {
-        list.push(Node::deserialize_stream(stream)?);
+    for i in 0..size {
+        list.push(Node::deserialize_stream(stream).chain_err(|| format!("Couldn't read list item: {}, size: {}", i, size))?);
     }
 
     Ok(list)
@@ -160,17 +159,25 @@ fn write_list(list: Vec<Node>, stream: &mut Write) -> Result<()> {
     Ok(())
 }
 
-fn nibble_to_char(nibble: u8) -> char {
-    match nibble {
-        0 ... 9 =>
-            char::from_digit(u32::from(nibble), 10).unwrap().to_ascii_uppercase(),
+fn nibble_to_char(nibble: u8) -> Result<char> {
+    Ok(match nibble {
+        0 => '0',
+        1 => '1',
+        2 => '2',
+        3 => '3',
+        4 => '4',
+        5 => '5',
+        6 => '6',
+        7 => '7',
+        8 => '8',
+        9 => '9',
         10 => '-',
         11 => '.',
         15 => '\0',
         _ => {
-            unimplemented!()
+            bail! {"invalid nibble: {}", nibble}
         }
-    }
+    })
 }
 
 fn char_to_nibble(nibble: char) -> u8 {
@@ -189,14 +196,14 @@ fn char_to_nibble(nibble: char) -> u8 {
         '.' => 11,
         '\0' => 15,
         _ => {
-            unimplemented!()
+            panic!("invalid nibble")
         }
     }
 }
 
 fn read_node_content(tag: u8, stream: &mut Read) -> Result<NodeContent> {
     Ok(match tag {
-        3 ... 151 => NodeContent::Token(TOKENS[(tag - 3) as usize]),
+        3...151 => NodeContent::Token(TOKENS[(tag - 3) as usize]),
         DICTIONARY_0 | DICTIONARY_1 | DICTIONARY_2 | DICTIONARY_3 => {
             stream.read_u8()?;
             NodeContent::List(Vec::new())
@@ -220,7 +227,7 @@ fn read_node_content(tag: u8, stream: &mut Read) -> Result<NodeContent> {
             String::from_utf8(buffer).map(|string| NodeContent::String(string.cow())).unwrap_or_else(|err| NodeContent::Binary(err.into_bytes()))
         }
         JID_PAIR => {
-            NodeContent::Jid(Jid::from_node_pair(read_node_content(stream.read_u8()?, stream)?.as_str(), read_node_content(stream.read_u8()?, stream)?.as_str()))
+            NodeContent::Jid(Jid::from_node_pair(read_node_content(stream.read_u8()?, stream)?.into_string(), read_node_content(stream.read_u8()?, stream)?.as_str())?)
         }
         NIBBLE_8 | HEX_8 => {
             let startbyte = stream.read_u8()?;
@@ -232,13 +239,13 @@ fn read_node_content(tag: u8, stream: &mut Read) -> Result<NodeContent> {
                     string.push(char::from_digit(u32::from((byte >> 4) & 0x0F), 16).unwrap().to_ascii_uppercase());
                     string.push(char::from_digit(u32::from(byte & 0x0F), 16).unwrap().to_ascii_uppercase());
                 } else {
-                    let mut nibble = nibble_to_char((byte >> 4) & 0x0F);
+                    let mut nibble = nibble_to_char((byte >> 4) & 0x0F)?;
                     if nibble == '\0' {
                         return Ok(NodeContent::Nibble(string.cow()));
                     }
                     string.push(nibble);
 
-                    nibble = nibble_to_char(byte & 0x0F);
+                    nibble = nibble_to_char(byte & 0x0F)?;
                     if nibble == '\0' {
                         return Ok(NodeContent::Nibble(string.cow()));
                     }
@@ -253,8 +260,7 @@ fn read_node_content(tag: u8, stream: &mut Read) -> Result<NodeContent> {
             NodeContent::String(string.cow())
         }
         _ => {
-            debug!("Invalid");
-            NodeContent::None
+            bail! {"Invalid Tag {}", tag}
         }
     })
 }
@@ -270,28 +276,28 @@ fn write_node_content(content: NodeContent, stream: &mut Write) -> Result<()> {
     match content {
         NodeContent::None => {
             stream.write_u8(LIST_EMPTY)?;
-            write_list(Vec::new(), stream)
+            write_list(Vec::new(), stream)?;
         }
-        NodeContent::List(list) => { write_list(list, stream) }
+        NodeContent::List(list) => { write_list(list, stream)?; }
         NodeContent::String(string) => {
             let string = string.deref();
             if let Some(token) = TOKENS.iter().position(|r| r == &string) {
-                stream.write_u8((token + 3) as u8)
+                stream.write_u8((token + 3) as u8)?
             } else {
-                write_node_binary(string.deref().as_bytes(), stream)
+                write_node_binary(string.deref().as_bytes(), stream)?;
             }
         }
         NodeContent::Binary(binary) => {
-            write_node_binary(&binary, stream)
+            write_node_binary(&binary, stream)?;
         }
         NodeContent::Jid(jid) => {
             stream.write_u8(JID_PAIR)?;
             let pair = jid.into_node_pair();
             write_node_content(NodeContent::Nibble(pair.0.cow()), stream)?;
-            write_node_content(NodeContent::Token(pair.1), stream)
+            write_node_content(NodeContent::Token(pair.1), stream)?;
         }
         NodeContent::Token(ref token) => {
-            stream.write_u8((TOKENS.iter().position(|r| r == token).unwrap() + 3) as u8)
+            stream.write_u8((TOKENS.iter().position(|r| r == token).unwrap() + 3) as u8)?
         }
         NodeContent::Nibble(string) => {
             let mut len = (string.len() as u8 + 1) / 2;
@@ -309,9 +315,9 @@ fn write_node_content(content: NodeContent, stream: &mut Write) -> Result<()> {
             if let Some(last_nibble) = last_nibble {
                 stream.write_u8((last_nibble << 4) + 15)?;
             }
-            Ok(())
         }
     }
+    Ok(())
 }
 
 impl Node {
@@ -320,7 +326,7 @@ impl Node {
         Node {
             desc: desc.cow(),
             attributes,
-            content
+            content,
         }
     }
 
@@ -329,7 +335,7 @@ impl Node {
         Node {
             desc: desc.cow(),
             attributes: HashMap::new(),
-            content: NodeContent::None
+            content: NodeContent::None,
         }
     }
 
@@ -337,11 +343,11 @@ impl Node {
         self.desc.deref()
     }
 
-    pub fn take_attribute(&mut self, key: &'static str) -> errors::Result<NodeContent> {
+    pub fn take_attribute(&mut self, key: &'static str) -> Result<NodeContent> {
         self.attributes.remove(&key.cow()).ok_or_else(|| ErrorKind::NodeAttributeMissing(key).into())
     }
 
-    pub fn get_attribute<'a>(&'a self, key: &'static str) -> errors::Result<&'a NodeContent> {
+    pub fn get_attribute<'a>(&'a self, key: &'static str) -> Result<&'a NodeContent> {
         self.attributes.get(&key.cow()).ok_or_else(|| ErrorKind::NodeAttributeMissing(key).into())
     }
 
@@ -350,50 +356,51 @@ impl Node {
     }
 
 
-    pub fn deserialize(data: &[u8]) -> errors::Result<Node> {
+    pub fn deserialize(data: &[u8]) -> Result<Node> {
         Node::deserialize_stream(&mut Cursor::new(data)).chain_err(|| "Node has invalid binary format")
     }
 
     fn deserialize_stream(stream: &mut Read) -> Result<Node> {
-        let list_size = read_list_size(stream.read_u8()?, stream)?;
-        let desc = read_node_content(stream.read_u8()?, stream)?.into_cow();
+        let list_size = read_list_size(stream.read_u8()?, stream).chain_err(|| "Couldn't read attribute count")?;
+        let desc = read_node_content(stream.read_u8()?, stream).chain_err(|| "Couldn't read description")?.into_cow();
 
         let mut attributes = HashMap::new();
 
         for _ in 0..((list_size - 2 + list_size % 2) / 2) {
-            attributes.insert(read_node_content(stream.read_u8()?, stream)?.into_cow(), read_node_content(stream.read_u8()?, stream)?);
+            let attribute_name = read_node_content(stream.read_u8()?, stream).chain_err(|| format!("Couldn't read attribute name, node decription: {}", desc))?.into_cow();
+            let attribute_content = read_node_content(stream.read_u8()?, stream).chain_err(|| format!("Couldn't read attribute :{}, node decription: {}", attribute_name, desc))?;
+
+            attributes.insert(attribute_name, attribute_content);
         }
 
-        if list_size % 2 == 1 {
-            Ok(Node { desc, attributes, content: NodeContent::None })
+        let content = if list_size % 2 == 1 {
+            NodeContent::None
         } else {
             let tag = stream.read_u8()?;
-            Ok(Node {
-                desc,
-                attributes,
-                content: match tag {
-                    LIST_EMPTY | LIST_8 | LIST_16 => NodeContent::List(read_list(tag, stream)?),
-                    BINARY_8 => {
-                        let mut buffer = vec![0u8; stream.read_u8()? as usize];
-                        stream.read_exact(&mut buffer)?;
-                        NodeContent::Binary(buffer)
-                    }
-                    BINARY_20 => {
-                        let len: usize = ((stream.read_u8()? as usize & 0x0F) << 16) | (stream.read_u8()? as usize) << 8 | stream.read_u8()? as usize;
-
-                        let mut buffer = vec![0u8; len];
-                        stream.read_exact(&mut buffer)?;
-                        NodeContent::Binary(buffer)
-                    }
-                    BINARY_32 => {
-                        let mut buffer = vec![0u8; stream.read_u32::<LittleEndian>()? as usize];
-                        stream.read_exact(&mut buffer)?;
-                        NodeContent::Binary(buffer)
-                    }
-                    _ => unimplemented!()//return Err(())
+            match tag {
+                LIST_EMPTY | LIST_8 | LIST_16 => NodeContent::List(read_list(tag, stream).chain_err(|| format!("Couldn't read node content (list), node decription: {}", desc))?),
+                BINARY_8 => {
+                    let mut buffer = vec![0u8; stream.read_u8()? as usize];
+                    stream.read_exact(&mut buffer)?;
+                    NodeContent::Binary(buffer)
                 }
-            })
-        }
+                BINARY_20 => {
+                    let len: usize = ((stream.read_u8()? as usize & 0x0F) << 16) | (stream.read_u8()? as usize) << 8 | stream.read_u8()? as usize;
+
+                    let mut buffer = vec![0u8; len];
+                    stream.read_exact(&mut buffer)?;
+                    NodeContent::Binary(buffer)
+                }
+                BINARY_32 => {
+                    let mut buffer = vec![0u8; stream.read_u32::<LittleEndian>()? as usize];
+                    stream.read_exact(&mut buffer)?;
+                    NodeContent::Binary(buffer)
+                }
+                _ => unimplemented!()//return Err(())
+            }
+        };
+
+        Ok(Node { desc, attributes, content })
     }
 
     pub fn serialize(self) -> Vec<u8> {
@@ -426,16 +433,16 @@ impl Node {
 }
 
 impl Jid {
-    fn from_node_pair(id: &str, surfix: &str) -> Jid {
-        Jid {
-            id: id.to_string(),
+    fn from_node_pair(id: String, surfix: &str) -> Result<Jid> {
+        Ok(Jid {
+            id,
             is_group: match surfix {
                 "c.us" => false,
                 "g.us" => true,
                 "s.whatsapp.net" => false,
-                _ => unimplemented!()//return Err(())
-            }
-        }
+                _ => bail! {"invalid jid surfix {}", surfix}
+            },
+        })
     }
 
     fn into_node_pair(self) -> (String, &'static str) {
