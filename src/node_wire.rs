@@ -440,6 +440,7 @@ impl Jid {
                 "c.us" => false,
                 "g.us" => true,
                 "s.whatsapp.net" => false,
+                "broadcast" => false, //Todo
                 _ => bail! {"invalid jid surfix {}", surfix}
             },
         })

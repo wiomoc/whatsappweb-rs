@@ -84,6 +84,7 @@ impl FromStr for Jid {
                 "@c.us" => false,
                 "@g.us" => true,
                 "@s.whatsapp.net" => false,
+                "@broadcast" => false, //TODO
                 _ => return Err("invalid surfix".into())
             },
         })
