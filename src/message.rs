@@ -25,20 +25,20 @@ impl MessageId {
 #[derive(Debug, Clone)]
 pub enum Peer {
     Individual(Jid),
-    Group { group: Jid, participant: Jid }
+    Group { group: Jid, participant: Jid },
 }
 
 #[derive(Debug, Clone)]
 pub enum PeerAck {
     Individual(Jid),
     GroupIndividual { group: Jid, participant: Jid },
-    GroupAll(Jid)
+    GroupAll(Jid),
 }
 
 #[derive(Debug)]
 pub enum Direction {
     Sending(Jid),
-    Receiving(Peer)
+    Receiving(Peer),
 }
 
 impl Direction {
@@ -62,13 +62,13 @@ pub enum MessageAckLevel {
     Send = 1,
     Received = 2,
     Read = 3,
-    Played = 4
+    Played = 4,
 }
 
 #[derive(Debug)]
 pub enum MessageAckSide {
     Here(Peer),
-    There(PeerAck)
+    There(PeerAck),
 }
 
 #[derive(Debug)]
@@ -97,7 +97,7 @@ impl MessageAck {
                 } else {
                     Peer::Individual(sender)
                 })
-            }
+            },
         }
     }
 
@@ -118,7 +118,7 @@ impl MessageAck {
                 } else {
                     Peer::Individual(jid)
                 })
-            }
+            },
         }
     }
 }
@@ -130,7 +130,7 @@ pub struct FileInfo {
     pub sha256: Vec<u8>,
     pub enc_sha256: Vec<u8>,
     pub size: usize,
-    pub key: Vec<u8>
+    pub key: Vec<u8>,
 }
 
 #[derive(Debug)]
@@ -138,7 +138,7 @@ pub enum ChatMessageContent {
     Text(String),
     Image(FileInfo, (u32, u32), Vec<u8>),
     Audio(FileInfo, Duration),
-    Document(FileInfo, String)
+    Document(FileInfo, String),
 }
 
 impl ChatMessageContent {
@@ -153,7 +153,7 @@ impl ChatMessageContent {
                 sha256: image_message.take_fileSha256(),
                 enc_sha256: image_message.take_fileEncSha256(),
                 size: image_message.get_fileLength() as usize,
-                key: image_message.take_mediaKey()
+                key: image_message.take_mediaKey(),
             }, (image_message.get_height(), image_message.get_width()), image_message.take_jpegThumbnail())
         } else if message.has_audioMessage() {
             let mut audio_message = message.take_audioMessage();
@@ -163,7 +163,7 @@ impl ChatMessageContent {
                 sha256: audio_message.take_fileSha256(),
                 enc_sha256: audio_message.take_fileEncSha256(),
                 size: audio_message.get_fileLength() as usize,
-                key: audio_message.take_mediaKey()
+                key: audio_message.take_mediaKey(),
             }, Duration::new(u64::from(audio_message.get_seconds()), 0))
         } else if message.has_documentMessage() {
             let mut document_message = message.take_documentMessage();
@@ -173,7 +173,7 @@ impl ChatMessageContent {
                 sha256: document_message.take_fileSha256(),
                 enc_sha256: document_message.take_fileEncSha256(),
                 size: document_message.get_fileLength() as usize,
-                key: document_message.take_mediaKey()
+                key: document_message.take_mediaKey(),
             }, document_message.take_fileName())
         } else {
             ChatMessageContent::Text("TODO".to_string())
@@ -220,12 +220,17 @@ pub struct ChatMessage {
     pub direction: Direction,
     pub time: NaiveDateTime,
     pub id: MessageId,
-    pub content: ChatMessageContent
+    pub content: ChatMessageContent,
 }
 
 impl ChatMessage {
-    pub fn from_proto(content: &[u8]) -> Result<ChatMessage> {
-        let mut webmessage = protobuf::parse_from_bytes::<message_wire::WebMessageInfo>(content).chain_err(|| "Invalid Protobuf chatmessage")?;
+    pub fn from_proto_binary(content: &[u8]) -> Result<ChatMessage> {
+        let webmessage = protobuf::parse_from_bytes::<message_wire::WebMessageInfo>(content).chain_err(|| "Invalid Protobuf chatmessage")?;
+        ChatMessage::from_proto(webmessage)
+    }
+
+
+    pub fn from_proto(mut webmessage: message_wire::WebMessageInfo) -> Result<ChatMessage> {
         debug!("Processing WebMessageInfo: {:?}", &webmessage);
         let mut key = webmessage.take_key();
 
@@ -233,12 +238,16 @@ impl ChatMessage {
             id: MessageId(key.take_id()),
             direction: Direction::parse(key)?,
             time: NaiveDateTime::from_timestamp(webmessage.get_messageTimestamp() as i64, 0),
-            content: ChatMessageContent::from_proto(webmessage.take_message())?
+            content: ChatMessageContent::from_proto(webmessage.take_message())?,
         })
     }
 
+    pub fn into_proto_binary(self) -> Vec<u8> {
+        let webmessage = self.into_proto();
+        webmessage.write_to_bytes().unwrap()
+    }
 
-    pub fn into_proto(self) -> Vec<u8> {
+    pub fn into_proto(self) -> message_wire::WebMessageInfo {
         let mut webmessage = message_wire::WebMessageInfo::new();
         let mut key = message_wire::MessageKey::new();
 
@@ -259,7 +268,7 @@ impl ChatMessage {
         webmessage.set_status(message_wire::WebMessageInfo_STATUS::PENDING);
         debug!("Building WebMessageInfo: {:?}", &webmessage);
 
-        webmessage.write_to_bytes().unwrap()
+        webmessage
     }
 }
 

@@ -120,7 +120,7 @@ pub fn encrypt_media_message(media_type: MediaType, file: &[u8]) -> (Vec<u8>, Ve
     let iv = &media_key_expanded[0..16];
 
     let size_with_padding = aes_encrypt(&cipher_key, iv, &file, &mut file_encrypted);
-    file_encrypted.truncate(10 + size_with_padding);
+    file_encrypted.truncate(size_with_padding);
 
     let hmac_data = [iv, &file_encrypted].concat();
 
@@ -134,7 +134,7 @@ pub fn encrypt_media_message(media_type: MediaType, file: &[u8]) -> (Vec<u8>, Ve
 pub fn decrypt_media_message(key: &[u8], media_type: MediaType, file_encrypted: &[u8]) -> Result<Vec<u8>> {
     let media_key_expanded = derive_media_keys(key, media_type);
 
-    let mut file = vec![0u8; file_encrypted.len() - 16];
+    let mut file = vec![0u8; file_encrypted.len() - 10];
 
     let mut cipher_key = Vec::with_capacity(32);
     cipher_key.extend_from_slice(&media_key_expanded[16..48]);
@@ -147,7 +147,7 @@ pub fn decrypt_media_message(key: &[u8], media_type: MediaType, file_encrypted: 
                                &hmac_data);
 
     if file_encrypted[(size - 10)..] != signature.as_ref()[..10] {
-        bail!{"Invalid mac"}
+        bail! {"Invalid mac"}
     }
 
 
@@ -161,7 +161,6 @@ pub(crate) fn aes_encrypt(key: &[u8], iv: &[u8], input: &[u8], output: &mut [u8]
     let mut aes_encrypt = aes::cbc_encryptor(aes::KeySize::KeySize256, key, iv, blockmodes::PkcsPadding);
 
     let mut read_buffer = RefReadBuffer::new(input);
-
 
     let mut write_buffer = RefWriteBuffer::new(output);
 
@@ -185,6 +184,7 @@ mod tests {
     use super::*;
     use base64;
     use node_wire::Node;
+    use std::io::stdin;
 
 
     #[test]
@@ -194,16 +194,24 @@ mod tests {
 
         let mac = base64::decode("").unwrap();
 
-        let msg = base64::decode("").unwrap();
-        let pos = msg.iter().position(|x| x == &b',').unwrap() + 3;
+        loop {
+            let mut line = String::new();
+            stdin().read_line(&mut line).unwrap();
+            let len = line.len();
+            line.truncate(len - 1);
+            let msg = base64::decode(&line).unwrap();
+            let pos = msg.iter().position(|x| x == &b',').unwrap() + 3;
 
-        let dec_msg = verify_and_decrypt_message(&enc, &mac, &msg[pos..]);
+            let dec_msg = verify_and_decrypt_message(&enc, &mac, &msg[pos..]).unwrap();
 
-        println!("{:?}", Node::deserialize(&dec_msg).unwrap());
+            let node = Node::deserialize(&dec_msg).unwrap();
+
+            println!("{:?}", node);
+        }
     }
 
     #[test]
-    fn test_sign_verify() {
+    fn test_encrypt_decrypt_message() {
         let mut enc = vec![0u8; 32];
         SystemRandom::new().fill(&mut enc).unwrap();
 
@@ -214,7 +222,21 @@ mod tests {
         SystemRandom::new().fill(&mut msg).unwrap();
         let enc_msg = sign_and_encrypt_message(&enc, &mac, &msg);
 
-        let dec_msg = verify_and_decrypt_message(&enc, &mac, &enc_msg);
+        let dec_msg = verify_and_decrypt_message(&enc, &mac, &enc_msg).unwrap();
+
+        assert_eq!(msg, dec_msg);
+    }
+
+    #[test]
+    fn test_encrypt_decrypt_media() {
+        let mut msg = vec![0u8; 300];
+        SystemRandom::new().fill(&mut msg).unwrap();
+
+        let media_type = MediaType::Image;
+
+        let (enc_msg, key) = encrypt_media_message(media_type, &msg);
+
+        let dec_msg = decrypt_media_message(&key, media_type, &enc_msg).unwrap();
 
         assert_eq!(msg, dec_msg);
     }

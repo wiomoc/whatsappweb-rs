@@ -698,16 +698,16 @@ impl<H: WhatsappWebHandler<H> + Send + Sync + 'static> Handler for WsHandler<H> 
         self.whatsapp_connection.ws_on_disconnected();
     }
 }
+
 /// Stores the parameters to login without scanning the qrcode again.
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct PersistentSession {
-    client_token: String,
-    server_token: String,
-    client_id: [u8; 8],
-    enc: [u8; 32],
-    mac: [u8; 32]
+    pub client_token: String,
+    pub server_token: String,
+    pub client_id: [u8; 8],
+    pub enc: [u8; 32],
+    pub mac: [u8; 32]
 }
-
 
 const ENDPOINT_URL: &str = "wss://w7.web.whatsapp.com/ws";
 

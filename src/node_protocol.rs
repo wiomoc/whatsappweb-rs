@@ -88,7 +88,7 @@ impl AppMessage {
                         match node.desc() {
                             "message" => {
                                 if let NodeContent::Binary(ref content) = node.content {
-                                    app_events.push(AppEvent::Message(Box::new(ChatMessage::from_proto(content)?)));
+                                    app_events.push(AppEvent::Message(Box::new(ChatMessage::from_proto_binary(content)?)));
                                 } else {
                                     bail!{ "invalid nodetype for chatmessage" }
                                 }
@@ -213,7 +213,7 @@ impl AppMessage {
                             }
 
                             AppEvent::Message(message) => {
-                                Node::new("message", HashMap::new(), NodeContent::Binary(message.into_proto()))
+                                Node::new("message", HashMap::new(), NodeContent::Binary(message.into_proto_binary()))
                             }
                             AppEvent::GroupCommand { inducer, id, participants, command } => {
                                 let mut attributes = HashMap::new();
@@ -336,7 +336,7 @@ pub fn parse_message_response(root_node: Node) -> Result<Vec<ChatMessage>> {
             let mut messages = Vec::with_capacity(nodes.len());
             for node in nodes {
                 if let NodeContent::Binary(ref content) = node.content {
-                    messages.push(ChatMessage::from_proto(content)?);
+                    messages.push(ChatMessage::from_proto_binary(content)?);
                 } else {
                     bail!{ "invalid nodetype for chatmessage" }
                 }

@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 use std::time::{SystemTime, UNIX_EPOCH};
 use ws::Sender;
 use ws::util::{Token, Timeout};

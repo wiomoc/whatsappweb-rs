@@ -266,8 +266,23 @@ fn read_node_content(tag: u8, stream: &mut Read) -> Result<NodeContent> {
 }
 
 fn write_node_binary(binary: &[u8], stream: &mut Write) -> Result<()> {
-    stream.write_u8(BINARY_8)?;
-    stream.write_u8(binary.len() as u8)?;
+    let len = binary.len();
+    match len {
+        0...255 => {
+            stream.write_u8(BINARY_8)?;
+            stream.write_u8(len as u8)?;
+        }
+        256...1_048_575 => {
+            stream.write_u8(BINARY_20)?;
+            stream.write_u8((len >> 16) as u8)?;
+            stream.write_u8((len >> 8) as u8)?;
+            stream.write_u8(len as u8)?;
+        }
+        _ => {
+            stream.write_u8(BINARY_32)?;
+            stream.write_u32::<LittleEndian>(len as u32)?;
+        }
+    }
     stream.write_all(binary)?;
     Ok(())
 }
@@ -475,6 +490,7 @@ impl IntoCow for String {
 mod tests {
     use super::*;
     use super::Jid;
+    use std::str::FromStr;
 
     #[test]
     fn test_ser_de() {

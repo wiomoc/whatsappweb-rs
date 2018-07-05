@@ -59,11 +59,11 @@ impl Jid {
     }
 
     pub fn from_phone_number(mut phonenumber: String) -> Result<Jid> {
-        if phonenumber.chars().next() == Some('+') {
+        if phonenumber.starts_with('+') {
             phonenumber.remove(0);
         }
 
-        if phonenumber.chars().find(|c| !c.is_digit(10)).is_some() {
+        if phonenumber.chars().any(|c| !c.is_digit(10)) {
            return Err("not a valid phonenumber".into());
         }
 

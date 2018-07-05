@@ -7,8 +7,7 @@ Big thanks to [sigalor](https://github.com/sigalor) and contributors of [whatsap
 
 
 ## Features
-* receive text-, image-, audiomessages
-* send Textmessages
+* send/receive text-, image-, audiomessages
 * create/modify groups
 * get userinfo (status, presence, profilepic)
 * get contacts, chats
@@ -23,8 +22,9 @@ Big thanks to [sigalor](https://github.com/sigalor) and contributors of [whatsap
 ## TODO
 * refactoring
 * error messages
-* send mediamessages
+* ~~send mediamessages~~
 * delete, unpin, unmute messages
+* broadcast handling
 * documention
 * ...
 
