@@ -32,14 +32,21 @@ pub fn generate_thumbnail_and_get_size(image: &[u8]) -> (Vec<u8>, (u32, u32)) {
 }
 
 /// Download file from servers and decrypt it
-pub fn download_file<H>(file_info: FileInfo, media_type: MediaType, callback: Box<Fn(Result<Vec<u8>>) + Send + Sync>)
-    where H: WhatsappWebHandler + Send + Sync + 'static {
+pub fn download_file(file_info: FileInfo, media_type: MediaType, callback: Box<Fn(Result<Vec<u8>>) + Send + Sync>) {
     thread::spawn(move || {
         let mut file_enc = Cursor::new(Vec::with_capacity(file_info.size));
 
         callback(reqwest::get(&file_info.url)
-            .and_then(|mut response| response.copy_to(&mut file_enc))
             .map_err(|e| Error::with_chain(e, "could not load file"))
+            .and_then(|mut response| {
+                let status = response.status();
+                if status.is_success() {
+                    response.copy_to(&mut file_enc)
+                        .map_err(|e| Error::with_chain(e, "could not load file"))
+                } else {
+                    bail!{"received http status code {}", status.as_u16()}
+                }
+            })
             .and_then(|_| crypto::decrypt_media_message(&file_info.key, media_type, &file_enc.into_inner())));
     });
 }
@@ -54,7 +61,6 @@ pub fn upload_file<H>(file: &[u8], media_type: MediaType, connection: &WhatsappW
 
     let (file_encrypted, media_key) = crypto::encrypt_media_message(media_type, file);
     let file_encrypted_hash = crypto::sha256(&file_encrypted);
-
 
 
     //Todo refactoring, remove arc -> request_file_upload fnonce

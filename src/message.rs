@@ -15,8 +15,10 @@ pub struct MessageId(pub String);
 
 impl MessageId {
     pub fn generate() -> MessageId {
-        let mut message_id_binary = vec![0u8; 10];
-        SystemRandom::new().fill(&mut message_id_binary).unwrap();
+        let mut message_id_binary = vec![0u8; 12];
+        message_id_binary[0] = 0x3E;
+        message_id_binary[1] = 0xB0;
+        SystemRandom::new().fill(&mut message_id_binary[2..]).unwrap();
         MessageId(message_id_binary.iter().map(|b| format!("{:X}", b)).collect::<Vec<_>>().concat())
     }
 }
