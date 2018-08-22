@@ -18,10 +18,12 @@ extern crate byteorder;
 extern crate chrono;
 #[macro_use]
 extern crate error_chain;
+#[cfg(feature = "media")]
 extern crate reqwest;
 
 pub mod connection;
 pub mod message;
+#[cfg(feature = "media")]
 pub mod media;
 mod message_wire;
 mod node_protocol;
@@ -39,7 +41,7 @@ use errors::*;
 
 #[derive(Debug, Clone, PartialOrd, PartialEq)]
 pub struct Jid {
-    id: String,
+    pub id: String,
     pub is_group: bool,
 }
 
@@ -58,13 +60,13 @@ impl Jid {
         }
     }
 
-    pub fn from_phone_number(mut phonenumber: String) -> Result<Jid> {
+    pub fn from_phonenumber(mut phonenumber: String) -> Result<Jid> {
         if phonenumber.starts_with('+') {
             phonenumber.remove(0);
         }
 
         if phonenumber.chars().any(|c| !c.is_digit(10)) {
-           return Err("not a valid phonenumber".into());
+            return Err("not a valid phonenumber".into());
         }
 
         Ok(Jid { id: phonenumber, is_group: false })
@@ -122,13 +124,13 @@ pub enum PresenceStatus {
 
 #[derive(Debug)]
 pub struct GroupMetadata {
-    creation_time: i64,
-    id: Jid,
-    owner: Option<Jid>,
-    participants: Vec<(Jid, bool)>,
-    subject: String,
-    subject_owner: Jid,
-    subject_time: i64,
+    pub creation_time: i64,
+    pub id: Jid,
+    pub owner: Option<Jid>,
+    pub participants: Vec<(Jid, bool)>,
+    pub subject: String,
+    pub subject_owner: Jid,
+    pub subject_time: i64,
 }
 
 #[derive(Debug, Copy, Clone)]

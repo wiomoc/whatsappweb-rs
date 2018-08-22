@@ -1,6 +1,9 @@
 # whatsappweb-rs
 **Heavily WIP**
 
+[![crates.io](http://meritbadge.herokuapp.com/whatsappweb)](https://crates.io/crates/whatsappweb)
+[![docs.rs](https://docs.rs/whatsappweb/badge.svg)](https://docs.rs/crate/whatsappweb)
+
 **Whatsapp Web Client written in Rust**
 
 Big thanks to [sigalor](https://github.com/sigalor) and contributors of [whatsapp-web-reveng](https://github.com/sigalor/whatsapp-web-reveng) 🍻

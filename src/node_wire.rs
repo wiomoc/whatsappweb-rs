@@ -27,7 +27,7 @@ const NIBBLE_8: u8 = 255;
 #[allow(dead_code)]
 const PACKED_MAX: u8 = 254;
 
-const TOKENS: [&str; 148] = ["200", "400", "404", "500", "501", "502", "action", "add",
+const TOKENS: [&str; 159] = ["200", "400", "404", "500", "501", "502", "action", "add",
     "after", "archive", "author", "available", "battery", "before", "body",
     "broadcast", "chat", "clear", "code", "composing", "contacts", "count",
     "create", "debug", "delete", "demote", "duplicate", "encoding", "error",
@@ -48,7 +48,8 @@ const TOKENS: [&str; 148] = ["200", "400", "404", "500", "501", "502", "action",
     "search", "media_message", "security", "call_log", "profile", "ciphertext",
     "invite", "gif", "vcard", "frequent", "privacy", "blacklist", "whitelist",
     "verify", "location", "document", "elapsed", "revoke_invite", "expiration",
-    "unsubscribe", "disable"
+    "unsubscribe", "disable", "vname", "old_jid", "new_jid", "announcement",
+    "locked", "prop", "label", "color", "call", "offer", "call-id"
 ];
 
 #[derive(Debug, PartialEq, Clone)]
@@ -203,12 +204,12 @@ fn char_to_nibble(nibble: char) -> u8 {
 
 fn read_node_content(tag: u8, stream: &mut Read) -> Result<NodeContent> {
     Ok(match tag {
-        3...151 => NodeContent::Token(TOKENS[(tag - 3) as usize]),
+        3...161 => NodeContent::Token(TOKENS[(tag - 3) as usize]),
         DICTIONARY_0 | DICTIONARY_1 | DICTIONARY_2 | DICTIONARY_3 => {
             stream.read_u8()?;
             NodeContent::List(Vec::new())
         }
-        LIST_EMPTY => NodeContent::List(Vec::new()),
+        LIST_EMPTY | LIST_8 | LIST_16 => NodeContent::List(read_list(tag, stream)?),
         BINARY_8 => {
             let mut buffer = vec![0u8; stream.read_u8()? as usize];
             stream.read_exact(&mut buffer)?;
@@ -381,7 +382,7 @@ impl Node {
 
         let mut attributes = HashMap::new();
 
-        for _ in 0..((list_size - 2 + list_size % 2) / 2) {
+        for _ in 0..((list_size - 1) >> 1) {
             let attribute_name = read_node_content(stream.read_u8()?, stream).chain_err(|| format!("Couldn't read attribute name, node decription: {}", desc))?.into_cow();
             let attribute_content = read_node_content(stream.read_u8()?, stream).chain_err(|| format!("Couldn't read attribute :{}, node decription: {}", attribute_name, desc))?;
 
@@ -393,7 +394,6 @@ impl Node {
         } else {
             let tag = stream.read_u8()?;
             match tag {
-                LIST_EMPTY | LIST_8 | LIST_16 => NodeContent::List(read_list(tag, stream).chain_err(|| format!("Couldn't read node content (list), node decription: {}", desc))?),
                 BINARY_8 => {
                     let mut buffer = vec![0u8; stream.read_u8()? as usize];
                     stream.read_exact(&mut buffer)?;
@@ -411,7 +411,7 @@ impl Node {
                     stream.read_exact(&mut buffer)?;
                     NodeContent::Binary(buffer)
                 }
-                _ => unimplemented!()//return Err(())
+                _ => read_node_content(tag, stream).chain_err(|| format!("Couldn't read node content (list), node decription: {}", desc))?
             }
         };
 

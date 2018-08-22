@@ -1,6 +1,7 @@
 use std::io;
 use ws;
 use ring;
+#[cfg(feature = "media")]
 use reqwest;
 use json;
 use base64;
@@ -11,7 +12,7 @@ error_chain! {
             Io(io::Error);
             Websocket(ws::Error);
             Crypto(ring::error::Unspecified);
-            Reqwest(reqwest::Error);
+            Reqwest(reqwest::Error) #[cfg(feature = "media")];
             Json(json::Error);
             Base64(base64::DecodeError);
             Protobuf(protobuf::ProtobufError);

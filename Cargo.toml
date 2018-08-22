@@ -1,6 +1,6 @@
 [package]
 name = "whatsappweb"
-version = "0.0.1"
+version = "0.0.2"
 authors = ["Christoph Walcher <christoph-wa@gmx.de>"]
 build = "build.rs"
 description = "WIP Whatsapp Web API Client"
@@ -15,7 +15,6 @@ debug = false
 lto = true
 debug-assertions = false
 codegen-units = 16
-panic = 'abort'
 
 [dependencies]
 ws = {version = "0.7.6", features = ["ssl"]}
@@ -33,10 +32,14 @@ serde = "1.0.64"
 serde_derive = "1.0.64"
 bincode = "1.0.0"
 byteorder = "1.2.1"
-protobuf = "~2.0"
+protobuf = "2.0.4"
 chrono = "0.4"
-reqwest = "0.8.6"
+reqwest = { version = "0.8.6", optional = true}
 error-chain = "0.12.0"
 
+[features]
+default-features = ["media"]
+"media" = ["reqwest"]
+
 [build-dependencies]
-protoc-rust = "2.0.2"
+protobuf-codegen-pure = "2.0.4"

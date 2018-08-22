@@ -1,11 +1,12 @@
-extern crate protoc_rust;
+extern crate protobuf_codegen_pure;
 
 fn main() {
-    protoc_rust::run(protoc_rust::Args {
+
+    protobuf_codegen_pure::run(protobuf_codegen_pure::Args {
         out_dir: "src",
         input: &["proto/message_wire.proto"],
         includes: &["proto"],
-        customize: protoc_rust::Customize {
+        customize: protobuf_codegen_pure::Customize {
             ..Default::default()
         }
     }).expect("protoc");
