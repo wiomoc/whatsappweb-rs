@@ -4,7 +4,7 @@ use std::char;
 use std::borrow::Cow;
 use std::ops::Deref;
 
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use Jid;
 use errors::*;
@@ -119,7 +119,7 @@ fn read_list_size(tag: u8, stream: &mut Read) -> Result<u16> {
     Ok(match tag {
         LIST_EMPTY => 0,
         LIST_8 => u16::from(stream.read_u8()?),
-        LIST_16 => stream.read_u16::<LittleEndian>()?,
+        LIST_16 => stream.read_u16::<BigEndian>()?,
         _ => bail! {"Invalid listsize tag: {}", tag}
     })
 }
@@ -133,7 +133,7 @@ fn write_list_size(size: u16, stream: &mut Write) -> Result<()> {
         }
         _ => {
             stream.write_u8(LIST_16)?;
-            stream.write_u16::<LittleEndian>(size)?;
+            stream.write_u16::<BigEndian>(size)?;
         }
     }
     Ok(())
@@ -223,7 +223,7 @@ fn read_node_content(tag: u8, stream: &mut Read) -> Result<NodeContent> {
             String::from_utf8(buffer).map(|string| NodeContent::String(string.cow())).unwrap_or_else(|err| NodeContent::Binary(err.into_bytes()))
         }
         BINARY_32 => {
-            let mut buffer = vec![0u8; stream.read_u32::<LittleEndian>()? as usize];
+            let mut buffer = vec![0u8; stream.read_u32::<BigEndian>()? as usize];
             stream.read_exact(&mut buffer)?;
             String::from_utf8(buffer).map(|string| NodeContent::String(string.cow())).unwrap_or_else(|err| NodeContent::Binary(err.into_bytes()))
         }
@@ -281,7 +281,7 @@ fn write_node_binary(binary: &[u8], stream: &mut Write) -> Result<()> {
         }
         _ => {
             stream.write_u8(BINARY_32)?;
-            stream.write_u32::<LittleEndian>(len as u32)?;
+            stream.write_u32::<BigEndian>(len as u32)?;
         }
     }
     stream.write_all(binary)?;
@@ -407,7 +407,7 @@ impl Node {
                     NodeContent::Binary(buffer)
                 }
                 BINARY_32 => {
-                    let mut buffer = vec![0u8; stream.read_u32::<LittleEndian>()? as usize];
+                    let mut buffer = vec![0u8; stream.read_u32::<BigEndian>()? as usize];
                     stream.read_exact(&mut buffer)?;
                     NodeContent::Binary(buffer)
                 }
