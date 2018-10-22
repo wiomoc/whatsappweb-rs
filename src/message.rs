@@ -137,26 +137,24 @@ pub struct FileInfo {
 
 #[derive(Debug)]
 pub struct LocationMessage {
-    // message fields
-    degrees_latitude: f64,
-    degrees_longitude: f64,
-    name: String,
-    address: String,
-    url: String,
-    jpeg_thumbnail: Vec<u8>,
+    pub degrees_latitude: f64,
+    pub degrees_longitude: f64,
+    pub name: String,
+    pub address: String,
+    pub url: String,
+    pub jpeg_thumbnail: Vec<u8>,
 }
 
 #[derive(Debug)]
 pub struct LiveLocationMessage {
-    // message fields
-    degrees_latitude: f64,
-    degrees_longitude: f64,
-    accuracy_in_meters: u32,
-    speed_in_mps: f32,
-    degrees_clockwise_from_magnetic_north: u32,
-    caption: String,
-    sequence_number: i64,
-    jpeg_thumbnail: Vec<u8>,
+    pub degrees_latitude: f64,
+    pub degrees_longitude: f64,
+    pub accuracy_in_meters: u32,
+    pub speed_in_mps: f32,
+    pub degrees_clockwise_from_magnetic_north: u32,
+    pub caption: String,
+    pub sequence_number: i64,
+    pub jpeg_thumbnail: Vec<u8>,
 }
 
 #[derive(Debug)]
