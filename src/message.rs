@@ -184,12 +184,12 @@ pub struct ExtendedTextMessage {
 #[derive(Debug)]
 pub enum ChatMessageContent {
     Text(String),
-    Image(FileInfo, (u32, u32), Vec<u8>),
+    Image(FileInfo, (u32, u32), String, Vec<u8>),
     Audio(FileInfo, Duration),
     Document(FileInfo, String),
     Location(LocationMessage),
     LiveLocation(LiveLocationMessage),
-    VideoMessage(FileInfo, (u32, u32), Duration, Vec<u8>),
+    VideoMessage(FileInfo, (u32, u32), Duration, String, Vec<u8>),
     ProtocolMessage(MessageKey, String),
     ContactMessage(ContactMessage),
     ContactArrayMessage(String, Vec<ContactMessage>),
@@ -210,7 +210,7 @@ impl ChatMessageContent {
                 enc_sha256: image_message.take_fileEncSha256(),
                 size: image_message.get_fileLength() as usize,
                 key: image_message.take_mediaKey(),
-            }, (image_message.get_height(), image_message.get_width()), image_message.take_jpegThumbnail())
+            }, (image_message.get_height(), image_message.get_width()), image_message.take_caption(), image_message.take_jpegThumbnail())
         } else if message.has_audioMessage() {
             let mut audio_message = message.take_audioMessage();
             ChatMessageContent::Audio(FileInfo {
@@ -243,6 +243,7 @@ impl ChatMessageContent {
             },
                                              (video_message.get_height(), video_message.get_width()),
                                              Duration::new(u64::from(video_message.get_seconds()), 0),
+                                             video_message.take_caption(),
                                              video_message.take_jpegThumbnail(),
             )
         } else if message.has_call() {
@@ -331,7 +332,7 @@ impl ChatMessageContent {
         let mut message = message_wire::Message::new();
         match self {
             ChatMessageContent::Text(text) => message.set_conversation(text),
-            ChatMessageContent::Image(info, size, thumbnail) => {
+            ChatMessageContent::Image(info, size, caption, thumbnail) => {
                 let mut image_message = message_wire::ImageMessage::new();
                 image_message.set_url(info.url);
                 image_message.set_mimetype(info.mime);
@@ -342,6 +343,7 @@ impl ChatMessageContent {
                 image_message.set_height(size.0);
                 image_message.set_width(size.1);
                 image_message.set_jpegThumbnail(thumbnail);
+                image_message.set_caption(caption);
                 message.set_imageMessage(image_message);
             }
             ChatMessageContent::Document(info, filename) => {
