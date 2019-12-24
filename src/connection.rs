@@ -90,7 +90,7 @@ pub trait WhatsappWebHandler<H = Self> where H: WhatsappWebHandler<H> + Send + S
 }
 
 enum SessionState {
-    PendingNew { private_key: Option<agreement::EphemeralPrivateKey>, public_key: Vec<u8>, client_id: [u8; 8], qr_callback: Box<Fn(QrCode) + Send> },
+    PendingNew { private_key: Option<agreement::EphemeralPrivateKey>, public_key: Vec<u8>, client_id: [u8; 8], qr_callback: Box<dyn Fn(QrCode) + Send> },
     PendingPersistent { persistent_session: PersistentSession },
     Established { persistent_session: PersistentSession },
     Teardown
@@ -108,7 +108,7 @@ enum WebsocketResponse {
 
 struct WhatsappWebConnectionInner<H: WhatsappWebHandler<H> + Send + Sync + 'static> {
     pub user_jid: Option<Jid>,
-    requests: HashMap<String, Box<Fn(WebsocketResponse, &WhatsappWebConnection<H>) + Send>>,
+    requests: HashMap<String, Box<dyn Fn(WebsocketResponse, &WhatsappWebConnection<H>) + Send>>,
     messages_tag_counter: u32,
     session_state: SessionState,
     websocket_state: WebsocketState,
@@ -117,7 +117,7 @@ struct WhatsappWebConnectionInner<H: WhatsappWebHandler<H> + Send + Sync + 'stat
 
 impl<H: WhatsappWebHandler<H> + Send + Sync + 'static> WhatsappWebConnectionInner<H> {
     
-    fn send_json_message(&mut self, message: JsonValue, cb: Box<Fn(JsonValue, &WhatsappWebConnection<H>) + Send>) {
+    fn send_json_message(&mut self, message: JsonValue, cb: Box<dyn Fn(JsonValue, &WhatsappWebConnection<H>) + Send>) {
         debug!("sending json {:?}", &message);
         let tag = self.alloc_message_tag();
         self.ws_send_message(WebsocketMessage {
@@ -140,19 +140,19 @@ impl<H: WhatsappWebHandler<H> + Send + Sync + 'static> WhatsappWebConnectionInne
     }
 
 
-    fn send_app_message(&mut self, tag: Option<String>, metric: WebsocketMessageMetric, app_message: AppMessage, cb: Box<Fn(WebsocketResponse, &WhatsappWebConnection<H>) + Send>) {
+    fn send_app_message(&mut self, tag: Option<String>, metric: WebsocketMessageMetric, app_message: AppMessage, cb: Box<dyn Fn(WebsocketResponse, &WhatsappWebConnection<H>) + Send>) {
         self.epoch += 1;
         let epoch = self.epoch;
         self.send_node_message(tag, metric, app_message.serialize(epoch), cb);
     }
 
     #[inline]
-    fn send_node_message(&mut self, tag: Option<String>, metric: WebsocketMessageMetric, node: Node, cb: Box<Fn(WebsocketResponse, &WhatsappWebConnection<H>) + Send>) {
+    fn send_node_message(&mut self, tag: Option<String>, metric: WebsocketMessageMetric, node: Node, cb: Box<dyn Fn(WebsocketResponse, &WhatsappWebConnection<H>) + Send>) {
         debug!("sending node {:?}", &node);
         self.send_binary_message(tag, metric, &node.serialize(), cb);
     }
 
-    fn ws_send_message(&mut self, message: WebsocketMessage, callback: Box<Fn(WebsocketResponse, &WhatsappWebConnection<H>) + Send>) {
+    fn ws_send_message(&mut self, message: WebsocketMessage, callback: Box<dyn Fn(WebsocketResponse, &WhatsappWebConnection<H>) + Send>) {
         if let WebsocketState::Connected(ref sender, _) = self.websocket_state {
             sender.send(message.serialize()).unwrap();
             self.requests.insert(message.tag.into(), callback);
@@ -165,7 +165,7 @@ impl<H: WhatsappWebHandler<H> + Send + Sync + 'static> WhatsappWebConnectionInne
         tag.to_string()
     }
 
-    fn send_binary_message(&mut self, tag: Option<String>, metric: WebsocketMessageMetric, message: &[u8], cb: Box<Fn(WebsocketResponse, &WhatsappWebConnection<H>) + Send>) {
+    fn send_binary_message(&mut self, tag: Option<String>, metric: WebsocketMessageMetric, message: &[u8], cb: Box<dyn Fn(WebsocketResponse, &WhatsappWebConnection<H>) + Send>) {
         let encrypted_message = if let SessionState::Established { ref persistent_session } = self.session_state {
             crypto::sign_and_encrypt_message(&persistent_session.enc, &persistent_session.mac, &message)
         } else {
@@ -266,9 +266,9 @@ impl<H: WhatsappWebHandler<H> + Send + Sync + 'static> WhatsappWebConnectionInne
             WebsocketState::Disconnected => WebsocketState::Connected(out, timeout_manager),
             WebsocketState::Connected(_, _) => return
         };
-        let message: (JsonValue, Box<Fn(JsonValue, &WhatsappWebConnection<H>) + Send>) = match self.session_state {
+        let message: (JsonValue, Box<dyn Fn(JsonValue, &WhatsappWebConnection<H>) + Send>) = match self.session_state {
             SessionState::PendingNew { ref client_id, .. } => {
-                let mut init_command = json_protocol::build_init_request(base64::encode(&client_id).as_str());
+                let init_command = json_protocol::build_init_request(base64::encode(&client_id).as_str());
 
                 (init_command, Box::new(move |response, connection| {
                     if let Ok(reference) = json_protocol::parse_init_response(&response) {
@@ -285,21 +285,21 @@ impl<H: WhatsappWebHandler<H> + Send + Sync + 'static> WhatsappWebConnectionInne
                             }
                         }
                     } else {
-                        error!("error");
+                        error!("error ws_on_connected");
                     }
                 }))
             }
             SessionState::PendingPersistent { ref persistent_session } => {
-                let mut init_command = json_protocol::build_init_request(base64::encode(&persistent_session.client_id).as_str());
+                let init_command = json_protocol::build_init_request(base64::encode(&persistent_session.client_id).as_str());
 
                 (init_command, Box::new(move |response, connection| {
                     if let Err(err) = json_protocol::parse_response_status(&response) {
                         error!("error {:?}", err);
                     } else {
                         let mut inner = connection.inner.lock().unwrap();
-                        let message: (JsonValue, Box<Fn(JsonValue, &WhatsappWebConnection<H>) + Send>) = match inner.session_state {
+                        let message: (JsonValue, Box<dyn Fn(JsonValue, &WhatsappWebConnection<H>) + Send>) = match inner.session_state {
                             SessionState::PendingPersistent { ref persistent_session } => {
-                                let mut login_command = json_protocol::build_takeover_request(persistent_session.client_token.as_str(),
+                                let login_command = json_protocol::build_takeover_request(persistent_session.client_token.as_str(),
                                                                                               persistent_session.server_token.as_str(),
                                                                                               &base64::encode(&persistent_session.client_id));
                                 (login_command, Box::new(move |response, connection| {
@@ -363,11 +363,11 @@ impl<H: WhatsappWebHandler<H> + Send + Sync> WhatsappWebConnection<H> {
         }
     }
 
-    fn send_json_message(&self, message: JsonValue, cb: Box<Fn(JsonValue, &WhatsappWebConnection<H>) + Send>) {
+    fn send_json_message(&self, message: JsonValue, cb: Box<dyn Fn(JsonValue, &WhatsappWebConnection<H>) + Send>) {
         self.inner.lock().unwrap().send_json_message(message, cb);
     }
 
-    fn send_app_message(&self, tag: Option<String>, metric: WebsocketMessageMetric, app_message: AppMessage, cb: Box<Fn(WebsocketResponse, &WhatsappWebConnection<H>) + Send>) {
+    fn send_app_message(&self, tag: Option<String>, metric: WebsocketMessageMetric, app_message: AppMessage, cb: Box<dyn Fn(WebsocketResponse, &WhatsappWebConnection<H>) + Send>) {
         self.inner.lock().unwrap().send_app_message(tag, metric, app_message, cb)
     }
 
@@ -580,7 +580,7 @@ impl<H: WhatsappWebHandler<H> + Send + Sync> WhatsappWebConnection<H> {
         self.inner.lock().unwrap().send_group_command(GroupCommand::ParticipantsChange(jid, participants_change), participants);
     }
 
-    pub fn get_messages_before(&self, jid: Jid, id: String, count: u16, callback: Box<Fn(Option<Vec<WhatsappMessage>>) + Send + Sync>) {
+    pub fn get_messages_before(&self, jid: Jid, id: String, count: u16, callback: Box<dyn Fn(Option<Vec<WhatsappMessage>>) + Send + Sync>) {
         let msg = AppMessage::Query(Query::MessagesBefore { jid, id, count });
         self.send_app_message(None, WebsocketMessageMetric::QueryMessages, msg, Box::new(move |response, _| {
             match response {
@@ -592,25 +592,25 @@ impl<H: WhatsappWebHandler<H> + Send + Sync> WhatsappWebConnection<H> {
         }));
     }
 
-    pub fn request_file_upload(&self, hash: &[u8], media_type: MediaType, callback: Box<Fn(Result<&str>) + Send + Sync>) {
+    pub fn request_file_upload(&self, hash: &[u8], media_type: MediaType, callback: Box<dyn Fn(Result<&str>) + Send + Sync>) {
         self.send_json_message(json_protocol::build_file_upload_request(hash, media_type), Box::new(move |response, _| {
             callback(json_protocol::parse_file_upload_response(&response));
         }));
     }
 
-    pub fn get_profile_picture(&self, jid: &Jid, callback: Box<Fn(Option<&str>) + Send + Sync>) {
+    pub fn get_profile_picture(&self, jid: &Jid, callback: Box<dyn Fn(Option<&str>) + Send + Sync>) {
         self.send_json_message(json_protocol::build_profile_picture_request(jid), Box::new(move |response, _| {
             callback(json_protocol::parse_profile_picture_response(&response));
         }));
     }
 
-    pub fn get_profile_status(&self, jid: &Jid, callback: Box<Fn(Option<&str>) + Send + Sync>) {
+    pub fn get_profile_status(&self, jid: &Jid, callback: Box<dyn Fn(Option<&str>) + Send + Sync>) {
         self.send_json_message(json_protocol::build_profile_status_request(jid), Box::new(move |response, _| {
             callback(json_protocol::parse_profile_status_response(&response));
         }));
     }
 
-    pub fn get_group_metadata(&self, jid: &Jid, callback: Box<Fn(Option<GroupMetadata>) + Send + Sync>) {
+    pub fn get_group_metadata(&self, jid: &Jid, callback: Box<dyn Fn(Option<GroupMetadata>) + Send + Sync>) {
         debug_assert!(jid.is_group);
         self.send_json_message(json_protocol::build_group_metadata_request(jid), Box::new(move |response, _| {
             callback(json_protocol::parse_group_metadata_response(&response).ok());
@@ -709,7 +709,7 @@ pub struct PersistentSession {
     pub mac: [u8; 32]
 }
 
-const ENDPOINT_URL: &str = "wss://w7.web.whatsapp.com/ws";
+const ENDPOINT_URL: &str = "wss://web.whatsapp.com/ws";
 
 /// Create new connection and session.
 /// Will eventual call ```qr_cb``` with the generated qr-code.

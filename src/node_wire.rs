@@ -115,7 +115,7 @@ pub struct Node {
     pub content: NodeContent,
 }
 
-fn read_list_size(tag: u8, stream: &mut Read) -> Result<u16> {
+fn read_list_size(tag: u8, stream: &mut dyn Read) -> Result<u16> {
     Ok(match tag {
         LIST_EMPTY => 0,
         LIST_8 => u16::from(stream.read_u8()?),
@@ -124,7 +124,7 @@ fn read_list_size(tag: u8, stream: &mut Read) -> Result<u16> {
     })
 }
 
-fn write_list_size(size: u16, stream: &mut Write) -> Result<()> {
+fn write_list_size(size: u16, stream: &mut dyn Write) -> Result<()> {
     match size {
         0 => { stream.write_u8(LIST_EMPTY)?; }
         1...256 => {
@@ -139,7 +139,7 @@ fn write_list_size(size: u16, stream: &mut Write) -> Result<()> {
     Ok(())
 }
 
-fn read_list(tag: u8, stream: &mut Read) -> Result<Vec<Node>> {
+fn read_list(tag: u8, stream: &mut dyn Read) -> Result<Vec<Node>> {
     let size = read_list_size(tag, stream).chain_err(|| "Couldn't read list size")?;
     let mut list = Vec::<Node>::with_capacity(size as usize);
 
@@ -150,7 +150,7 @@ fn read_list(tag: u8, stream: &mut Read) -> Result<Vec<Node>> {
     Ok(list)
 }
 
-fn write_list(list: Vec<Node>, stream: &mut Write) -> Result<()> {
+fn write_list(list: Vec<Node>, stream: &mut dyn Write) -> Result<()> {
     write_list_size(list.len() as u16, stream)?;
 
     for node in list {
@@ -202,7 +202,7 @@ fn char_to_nibble(nibble: char) -> u8 {
     }
 }
 
-fn read_node_content(tag: u8, stream: &mut Read) -> Result<NodeContent> {
+fn read_node_content(tag: u8, stream: &mut dyn Read) -> Result<NodeContent> {
     Ok(match tag {
         3...161 => NodeContent::Token(TOKENS[(tag - 3) as usize]),
         DICTIONARY_0 | DICTIONARY_1 | DICTIONARY_2 | DICTIONARY_3 => {
@@ -266,7 +266,7 @@ fn read_node_content(tag: u8, stream: &mut Read) -> Result<NodeContent> {
     })
 }
 
-fn write_node_binary(binary: &[u8], stream: &mut Write) -> Result<()> {
+fn write_node_binary(binary: &[u8], stream: &mut dyn Write) -> Result<()> {
     let len = binary.len();
     match len {
         0...255 => {
@@ -288,7 +288,7 @@ fn write_node_binary(binary: &[u8], stream: &mut Write) -> Result<()> {
     Ok(())
 }
 
-fn write_node_content(content: NodeContent, stream: &mut Write) -> Result<()> {
+fn write_node_content(content: NodeContent, stream: &mut dyn Write) -> Result<()> {
     match content {
         NodeContent::None => {
             stream.write_u8(LIST_EMPTY)?;
@@ -316,7 +316,7 @@ fn write_node_content(content: NodeContent, stream: &mut Write) -> Result<()> {
             stream.write_u8((TOKENS.iter().position(|r| r == token).unwrap() + 3) as u8)?
         }
         NodeContent::Nibble(string) => {
-            let mut len = (string.len() as u8 + 1) / 2;
+            let len = (string.len() as u8 + 1) / 2;
             stream.write_u8(NIBBLE_8)?;
             stream.write_u8((string.len() as u8 % 2) << 7 | len)?;
             let mut last_nibble = None;
@@ -376,7 +376,7 @@ impl Node {
         Node::deserialize_stream(&mut Cursor::new(data)).chain_err(|| "Node has invalid binary format")
     }
 
-    fn deserialize_stream(stream: &mut Read) -> Result<Node> {
+    fn deserialize_stream(stream: &mut dyn Read) -> Result<Node> {
         let list_size = read_list_size(stream.read_u8()?, stream).chain_err(|| "Couldn't read attribute count")?;
         let desc = read_node_content(stream.read_u8()?, stream).chain_err(|| "Couldn't read description")?.into_cow();
 
@@ -424,7 +424,7 @@ impl Node {
         cursor.into_inner()
     }
 
-    fn serialize_stream(self, stream: &mut Write) -> Result<()> {
+    fn serialize_stream(self, stream: &mut dyn Write) -> Result<()> {
         let list_size = match self.content {
             NodeContent::None => 1,
             _ => 2

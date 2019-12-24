@@ -138,7 +138,7 @@ impl AppMessage {
             "response" => {
                 match root_node.get_attribute("type")?.as_str() {
                     "contacts" => {
-                        if let NodeContent::List(mut list) = root_node.content {
+                        if let NodeContent::List(list) = root_node.content {
                             let mut contacts = Vec::with_capacity(list.len());
                             for mut node in list {
                                 contacts.push(Contact::parse_node(&mut node)?);
@@ -150,7 +150,7 @@ impl AppMessage {
                         }
                     }
                     "chat" => {
-                        if let NodeContent::List(mut list) = root_node.content {
+                        if let NodeContent::List(list) = root_node.content {
                             let mut chats = Vec::with_capacity(list.len());
                             for mut node in list {
                                 chats.push(Chat::parse_node(&mut node)?);
