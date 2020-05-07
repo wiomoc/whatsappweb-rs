@@ -289,7 +289,10 @@ impl ChatMessageContent {
                     id: key.take_id(),
                     participant: key.take_participant(),
                 }, match protocol_message.get_field_type() {
-                    message_wire::ProtocolMessage_TYPE::REVOKE => "REVOKE".to_string()
+                    message_wire::ProtocolMessage_PROTOCOL_MESSAGE_TYPE::REVOKE => "REVOKE".to_string(),
+                    message_wire::ProtocolMessage_PROTOCOL_MESSAGE_TYPE::EPHEMERAL_SETTING => "EPHEMERAL_SETTING".to_string(),
+                    message_wire::ProtocolMessage_PROTOCOL_MESSAGE_TYPE::EPHEMERAL_SYNC_RESPONSE => "EPHEMERAL_SYNC_RESPONSE".to_string(),
+                    message_wire::ProtocolMessage_PROTOCOL_MESSAGE_TYPE::HISTORY_SYNC_NOTIFICATION => "HISTORY_SYNC_NOTIFICATION".to_string(),
                 },
             )
         } else if message.has_contactMessage() {
@@ -414,7 +417,7 @@ impl ChatMessage {
 
         webmessage.set_message(self.content.into_proto());
 
-        webmessage.set_status(message_wire::WebMessageInfo_STATUS::PENDING);
+        webmessage.set_status(message_wire::WebMessageInfo_WEB_MESSAGE_INFO_STATUS::PENDING);
         debug!("Building WebMessageInfo: {:?}", &webmessage);
 
         webmessage

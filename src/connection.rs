@@ -260,6 +260,8 @@ impl<H: WhatsappWebHandler<H> + Send + Sync + 'static> WhatsappWebConnectionInne
     }
 
     fn ws_on_connected(&mut self, out: Sender) {
+        info!("ws_on_connected");
+
         let timeout_manager = timeout::TimeoutManager::new(&out, timeout::PING_TIMEOUT, timeout::TimeoutState::Normal);
 
         self.websocket_state = match self.websocket_state {
@@ -270,11 +272,14 @@ impl<H: WhatsappWebHandler<H> + Send + Sync + 'static> WhatsappWebConnectionInne
             SessionState::PendingNew { ref client_id, .. } => {
                 let init_command = json_protocol::build_init_request(base64::encode(&client_id).as_str());
 
+                info!("{}", init_command);
+
                 (init_command, Box::new(move |response, connection| {
+                    info!("{}", response);
                     if let Ok(reference) = json_protocol::parse_init_response(&response) {
                         match connection.inner.lock().unwrap().session_state {
                             SessionState::PendingNew { ref public_key, ref client_id, ref qr_callback, .. } => {
-                                debug!("QRCode: {}", reference);
+                                info!("QRCode: {}", reference);
 
                                 qr_callback(QrCode::new(
                                     format!("{},{},{}", reference, base64::encode(&public_key), base64::encode(&client_id))
@@ -397,10 +402,9 @@ impl<H: WhatsappWebHandler<H> + Send + Sync> WhatsappWebConnection<H> {
         }
         let message = WebsocketMessage::deserialize(message).unwrap();
 
-
         match message.payload {
             WebsocketMessagePayload::Json(payload) => {
-                debug!("received json: {:?}", &payload);
+                debug!("received json: {}", &payload);
 
                 if let Some(cb) = inner.requests.remove(message.tag.deref()) {
                     drop(inner);

@@ -6,7 +6,7 @@ use base64;
 use super::{Jid, PresenceStatus, GroupMetadata, GroupParticipantsChange, MediaType};
 use message::MessageAckLevel;
 use errors::*;
-
+use chrono::Local;
 
 #[derive(Debug)]
 pub enum ServerMessage<'a> {
@@ -209,6 +209,7 @@ impl GroupParticipantsChange {
 }
 
 pub fn parse_response_status(response: &JsonValue) -> Result<()> {
+    info!("{}", response);
     response["status"].as_u16().map_or(Ok(()), |status_code| if status_code == 200 {
         Ok(())
     } else {
@@ -217,7 +218,9 @@ pub fn parse_response_status(response: &JsonValue) -> Result<()> {
 }
 
 pub fn build_init_request(client_id: &str) -> JsonValue {
-    array!["admin", "init", array![0, 3, 2390], array!["ww-rs", "ww-rs"], client_id, true]
+    array!["admin", "init", array![0, 4, 2081], array!["ww-rs", "Chromium"], client_id, true]
+//    let nav = format!("Chromium at {}", Local::now().to_rfc3339());
+//    array!["admin", "init", array![0, 4, 2081], array![nav.as_str(), "Chromium"], client_id, true]
 }
 
 pub fn parse_init_response<'a>(response: &'a JsonValue) -> Result<&'a str> {
