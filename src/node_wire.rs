@@ -27,7 +27,7 @@ const NIBBLE_8: u8 = 255;
 #[allow(dead_code)]
 const PACKED_MAX: u8 = 254;
 
-const TOKENS: [&str; 159] = ["200", "400", "404", "500", "501", "502", "action", "add",
+const TOKENS: [&str; 173] = ["200", "400", "404", "500", "501", "502", "action", "add",
     "after", "archive", "author", "available", "battery", "before", "body",
     "broadcast", "chat", "clear", "code", "composing", "contacts", "count",
     "create", "debug", "delete", "demote", "duplicate", "encoding", "error",
@@ -49,7 +49,10 @@ const TOKENS: [&str; 159] = ["200", "400", "404", "500", "501", "502", "action",
     "invite", "gif", "vcard", "frequent", "privacy", "blacklist", "whitelist",
     "verify", "location", "document", "elapsed", "revoke_invite", "expiration",
     "unsubscribe", "disable", "vname", "old_jid", "new_jid", "announcement",
-    "locked", "prop", "label", "color", "call", "offer", "call-id"
+    "locked", "prop", "label", "color", "call", "offer", "call-id",
+    "quick_reply", "sticker", "pay_t", "accept", "reject", "sticker_pack",
+    "invalid", "canceled", "missed", "connected", "result", "audio",
+    "video", "recent"
 ];
 
 #[derive(Debug, PartialEq, Clone)]
@@ -204,7 +207,7 @@ fn char_to_nibble(nibble: char) -> u8 {
 
 fn read_node_content(tag: u8, stream: &mut dyn Read) -> Result<NodeContent> {
     Ok(match tag {
-        3...161 => NodeContent::Token(TOKENS[(tag - 3) as usize]),
+        3...176 => NodeContent::Token(TOKENS[(tag - 3) as usize]),
         DICTIONARY_0 | DICTIONARY_1 | DICTIONARY_2 | DICTIONARY_3 => {
             stream.read_u8()?;
             NodeContent::List(Vec::new())
