@@ -306,7 +306,7 @@ impl<H: WhatsappWebHandler<H> + Send + Sync + 'static> WhatsappWebConnectionInne
                             SessionState::PendingPersistent { ref persistent_session } => {
                                 let login_command = json_protocol::build_takeover_request(persistent_session.client_token.as_str(),
                                                                                               persistent_session.server_token.as_str(),
-                                                                                              &base64::encode(&persistent_session.client_id));
+                                                                                              &base64::encode(&persistent_session.client_id).as_str());
                                 (login_command, Box::new(move |response, connection| {
                                     if let Err(err) = json_protocol::parse_response_status(&response) {
                                         error!("error {:?}", err);

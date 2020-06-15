@@ -130,7 +130,7 @@ fn read_list_size(tag: u8, stream: &mut dyn Read) -> Result<u16> {
 fn write_list_size(size: u16, stream: &mut dyn Write) -> Result<()> {
     match size {
         0 => { stream.write_u8(LIST_EMPTY)?; }
-        1...256 => {
+        1..=256 => {
             stream.write_u8(LIST_8)?;
             stream.write_u8(size as u8)?;
         }
@@ -207,7 +207,7 @@ fn char_to_nibble(nibble: char) -> u8 {
 
 fn read_node_content(tag: u8, stream: &mut dyn Read) -> Result<NodeContent> {
     Ok(match tag {
-        3...176 => NodeContent::Token(TOKENS[(tag - 3) as usize]),
+        3..=176 => NodeContent::Token(TOKENS[(tag - 3) as usize]),
         DICTIONARY_0 | DICTIONARY_1 | DICTIONARY_2 | DICTIONARY_3 => {
             stream.read_u8()?;
             NodeContent::List(Vec::new())
@@ -272,11 +272,11 @@ fn read_node_content(tag: u8, stream: &mut dyn Read) -> Result<NodeContent> {
 fn write_node_binary(binary: &[u8], stream: &mut dyn Write) -> Result<()> {
     let len = binary.len();
     match len {
-        0...255 => {
+        0..=255 => {
             stream.write_u8(BINARY_8)?;
             stream.write_u8(len as u8)?;
         }
-        256...1_048_575 => {
+        256..=1_048_575 => {
             stream.write_u8(BINARY_20)?;
             stream.write_u8((len >> 16) as u8)?;
             stream.write_u8((len >> 8) as u8)?;

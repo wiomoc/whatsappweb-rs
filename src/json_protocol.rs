@@ -6,7 +6,6 @@ use base64;
 use super::{Jid, PresenceStatus, GroupMetadata, GroupParticipantsChange, MediaType};
 use message::MessageAckLevel;
 use errors::*;
-use chrono::Local;
 
 #[derive(Debug)]
 pub enum ServerMessage<'a> {
