@@ -90,7 +90,7 @@ pub trait WhatsappWebHandler<H = Self> where H: WhatsappWebHandler<H> + Send + S
 }
 
 enum SessionState {
-    PendingNew { private_key: Option<agreement::EphemeralPrivateKey>, public_key: Vec<u8>, client_id: [u8; 8], qr_callback: Box<dyn Fn(QrCode) + Send> },
+    PendingNew { private_key: Option<agreement::EphemeralPrivateKey>, public_key: Vec<u8>, client_id: [u8; 16], qr_callback: Box<dyn Fn(QrCode) + Send> },
     PendingPersistent { persistent_session: PersistentSession },
     Established { persistent_session: PersistentSession },
     Teardown
@@ -329,7 +329,7 @@ impl<H: WhatsappWebHandler<H> + Send + Sync + 'static> WhatsappWebConnectionInne
 
 impl<H: WhatsappWebHandler<H> + Send + Sync> WhatsappWebConnection<H> {
     fn new<Q: Fn(QrCode) + Send + 'static>(qr_callback: Box<Q>, handler: H) -> WhatsappWebConnection<H> {
-        let mut client_id = [0u8; 8];
+        let mut client_id = [0u8; 16];
         SystemRandom::new().fill(&mut client_id).unwrap();
 
         let (private_key, public_key) = crypto::generate_keypair();
@@ -708,7 +708,7 @@ impl<H: WhatsappWebHandler<H> + Send + Sync + 'static> Handler for WsHandler<H> 
 pub struct PersistentSession {
     pub client_token: String,
     pub server_token: String,
-    pub client_id: [u8; 8],
+    pub client_id: [u8; 16],
     pub enc: [u8; 32],
     pub mac: [u8; 32]
 }
