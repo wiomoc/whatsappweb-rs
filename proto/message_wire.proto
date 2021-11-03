@@ -144,10 +144,32 @@ message Chat {
 
 message ProtocolMessage {
     optional MessageKey key = 1;
-    enum TYPE {
+    enum PROTOCOL_MESSAGE_TYPE {
         REVOKE = 0;
+        EPHEMERAL_SETTING = 3;
+        EPHEMERAL_SYNC_RESPONSE = 4;
+        HISTORY_SYNC_NOTIFICATION = 5;
     }
-    optional TYPE type = 2;
+    optional PROTOCOL_MESSAGE_TYPE type = 2;
+    optional uint32 ephemeralExpiration = 4;
+    optional int64 ephemeralSettingTimestamp = 5;
+    optional HistorySyncNotification historySyncNotification = 6;
+}
+
+message HistorySyncNotification {
+    optional bytes fileSha256 = 1;
+    optional uint64 fileLength = 2;
+    optional bytes mediaKey = 3;
+    optional bytes fileEncSha256 = 4;
+    optional string directPath = 5;
+    enum HISTORY_SYNC_NOTIFICATION_HISTORYSYNCTYPE {
+        INITIAL_BOOTSTRAP = 0;
+        INITIAL_STATUS_V3 = 1;
+        FULL = 2;
+        RECENT = 3;
+    }
+    optional HISTORY_SYNC_NOTIFICATION_HISTORYSYNCTYPE syncType = 6;
+    optional uint32 chunkOrder = 7;
 }
 
 message ContactsArrayMessage {
@@ -306,7 +328,7 @@ message WebMessageInfo {
     required MessageKey key = 1;
     optional Message message = 2;
     optional uint64 messageTimestamp = 3;
-    enum STATUS {
+    enum WEB_MESSAGE_INFO_STATUS {
         ERROR = 0;
         PENDING = 1;
         SERVER_ACK = 2;
@@ -314,7 +336,7 @@ message WebMessageInfo {
         READ = 4;
         PLAYED = 5;
     }
-    optional STATUS status = 4 [default=PENDING];
+    optional WEB_MESSAGE_INFO_STATUS status = 4;
     optional string participant = 5;
     optional bool ignore = 16;
     optional bool starred = 17;
@@ -369,6 +391,32 @@ message WebMessageInfo {
         CALL_MISSED_VIDEO = 41;
         INDIVIDUAL_CHANGE_NUMBER = 42;
         GROUP_DELETE = 43;
+        GROUP_ANNOUNCE_MODE_MESSAGE_BOUNCE = 44;
+        CALL_MISSED_GROUP_VOICE = 45;
+        CALL_MISSED_GROUP_VIDEO = 46;
+        PAYMENT_CIPHERTEXT = 47;
+        PAYMENT_FUTUREPROOF = 48;
+        PAYMENT_TRANSACTION_STATUS_UPDATE_FAILED = 49;
+        PAYMENT_TRANSACTION_STATUS_UPDATE_REFUNDED = 50;
+        PAYMENT_TRANSACTION_STATUS_UPDATE_REFUND_FAILED = 51;
+        PAYMENT_TRANSACTION_STATUS_RECEIVER_PENDING_SETUP = 52;
+        PAYMENT_TRANSACTION_STATUS_RECEIVER_SUCCESS_AFTER_HICCUP = 53;
+        PAYMENT_ACTION_ACCOUNT_SETUP_REMINDER = 54;
+        PAYMENT_ACTION_SEND_PAYMENT_REMINDER = 55;
+        PAYMENT_ACTION_SEND_PAYMENT_INVITATION = 56;
+        PAYMENT_ACTION_REQUEST_DECLINED = 57;
+        PAYMENT_ACTION_REQUEST_EXPIRED = 58;
+        PAYMENT_ACTION_REQUEST_CANCELLED = 59;
+        BIZ_VERIFIED_TRANSITION_TOP_TO_BOTTOM = 60;
+        BIZ_VERIFIED_TRANSITION_BOTTOM_TO_TOP = 61;
+        BIZ_INTRO_TOP = 62;
+        BIZ_INTRO_BOTTOM = 63;
+        BIZ_NAME_CHANGE = 64;
+        BIZ_MOVE_TO_CONSUMER_APP = 65;
+        BIZ_TWO_TIER_MIGRATION_TOP = 66;
+        BIZ_TWO_TIER_MIGRATION_BOTTOM = 67;
+        OVERSIZED = 68;
+        GROUP_CHANGE_NO_FREQUENTLY_FORWARDED = 69;
     }
     optional STUBTYPE messageStubType = 24;
     optional bool clearMedia = 25;
@@ -414,4 +462,22 @@ message WebFeatures {
     optional FLAG queryVname = 8;
     optional FLAG voipIndividualIncoming = 9;
     optional FLAG quickRepliesQuery = 10;
+}
+
+message PaymentInfoStatus {
+        enum PAYMENT_INFO_STATUS {
+            UNKNOWN_STATUS = 0;
+            PROCESSING = 1;
+            SENT = 2;
+            NEED_TO_ACCEPT = 3;
+            COMPLETE = 4;
+            COULD_NOT_COMPLETE = 5;
+            REFUNDED = 6;
+            EXPIRED = 7;
+            REJECTED = 8;
+            CANCELLED = 9;
+            WAITING_FOR_PAYER = 10;
+            WAITING = 11;
+        }
+        optional PAYMENT_INFO_STATUS paymentInfoStatus = 0;
 }

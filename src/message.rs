@@ -136,11 +136,65 @@ pub struct FileInfo {
 }
 
 #[derive(Debug)]
+pub struct LocationMessage {
+    // message fields
+    pub degrees_latitude: f64,
+    pub degrees_longitude: f64,
+    pub name: String,
+    pub address: String,
+    pub url: String,
+    pub jpeg_thumbnail: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub struct LiveLocationMessage {
+    // message fields
+    pub degrees_latitude: f64,
+    pub degrees_longitude: f64,
+    pub accuracy_in_meters: u32,
+    pub speed_in_mps: f32,
+    pub degrees_clockwise_from_magnetic_north: u32,
+    pub caption: String,
+    pub sequence_number: i64,
+    pub jpeg_thumbnail: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub struct MessageKey {
+    pub remote_jid: String,
+    pub from_me: bool,
+    pub id: String,
+    pub participant: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ContactMessage {
+    pub display_name: String,
+    pub v_card: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExtendedTextMessage {
+    pub text: String,
+    pub title: String,
+    pub description: String,
+    pub thumbnail: Vec<u8>,
+}
+
+#[derive(Debug)]
 pub enum ChatMessageContent {
     Text(String),
-    Image(FileInfo, (u32, u32), Vec<u8>),
+    Image(FileInfo, (u32, u32), String, Vec<u8>),
     Audio(FileInfo, Duration),
     Document(FileInfo, String),
+    Location(LocationMessage),
+    LiveLocation(LiveLocationMessage),
+    VideoMessage(FileInfo, (u32, u32), Duration, String, Vec<u8>),
+    ProtocolMessage(MessageKey, String),
+    ContactMessage(ContactMessage),
+    ContactArrayMessage(String, Vec<ContactMessage>),
+    CallMessage(Vec<u8>),
+    ExtendedTextMessage(ExtendedTextMessage),
 }
 
 impl ChatMessageContent {
@@ -156,7 +210,7 @@ impl ChatMessageContent {
                 enc_sha256: image_message.take_fileEncSha256(),
                 size: image_message.get_fileLength() as usize,
                 key: image_message.take_mediaKey(),
-            }, (image_message.get_height(), image_message.get_width()), image_message.take_jpegThumbnail())
+            }, (image_message.get_height(), image_message.get_width()), image_message.take_caption(), image_message.take_jpegThumbnail())
         } else if message.has_audioMessage() {
             let mut audio_message = message.take_audioMessage();
             ChatMessageContent::Audio(FileInfo {
@@ -177,7 +231,102 @@ impl ChatMessageContent {
                 size: document_message.get_fileLength() as usize,
                 key: document_message.take_mediaKey(),
             }, document_message.take_fileName())
+        } else if message.has_videoMessage() {
+            let mut video_message = message.take_videoMessage();
+            ChatMessageContent::VideoMessage(FileInfo {
+                url: video_message.take_url(),
+                mime: video_message.take_mimetype(),
+                sha256: video_message.take_fileSha256(),
+                enc_sha256: video_message.take_fileEncSha256(),
+                size: video_message.get_fileLength() as usize,
+                key: video_message.take_mediaKey(),
+            },
+                                             (video_message.get_height(), video_message.get_width()),
+                                             Duration::new(u64::from(video_message.get_seconds()), 0),
+                                             video_message.take_caption(),
+                                             video_message.take_jpegThumbnail(),
+            )
+        } else if message.has_call() {
+            let mut call_message = message.take_call();
+            println!("{:?}", call_message);
+            ChatMessageContent::CallMessage(
+                call_message.take_callKey(),
+            )
+        } else if message.has_locationMessage() {
+            let mut location_message = message.take_locationMessage();
+            ChatMessageContent::Location(
+                LocationMessage {
+                    degrees_latitude: location_message.get_degreesLatitude(),
+                    degrees_longitude: location_message.get_degreesLongitude(),
+                    url: location_message.take_url(),
+                    address: location_message.take_address(),
+                    name: location_message.take_name(),
+                    jpeg_thumbnail: location_message.take_jpegThumbnail(),
+                }
+            )
+        } else if message.has_liveLocationMessage() {
+            let mut live_location_message = message.take_liveLocationMessage();
+            ChatMessageContent::LiveLocation(
+                LiveLocationMessage {
+                    degrees_latitude: live_location_message.get_degreesLatitude(),
+                    degrees_longitude: live_location_message.get_degreesLongitude(),
+                    accuracy_in_meters: live_location_message.get_accuracyInMeters(),
+                    speed_in_mps: live_location_message.get_speedInMps(),
+                    degrees_clockwise_from_magnetic_north: live_location_message.get_degreesClockwiseFromMagneticNorth(),
+                    caption: live_location_message.take_caption(),
+                    sequence_number: live_location_message.get_sequenceNumber(),
+                    jpeg_thumbnail: live_location_message.take_jpegThumbnail(),
+                }
+            )
+        } else if message.has_protocolMessage() {
+            let mut protocol_message = message.take_protocolMessage();
+            let mut key = protocol_message.take_key();
+
+            ChatMessageContent::ProtocolMessage(
+                MessageKey {
+                    remote_jid: key.take_remoteJid(),
+                    from_me: key.get_fromMe(),
+                    id: key.take_id(),
+                    participant: key.take_participant(),
+                }, match protocol_message.get_field_type() {
+                    message_wire::ProtocolMessage_PROTOCOL_MESSAGE_TYPE::REVOKE => "REVOKE".to_string(),
+                    message_wire::ProtocolMessage_PROTOCOL_MESSAGE_TYPE::EPHEMERAL_SETTING => "EPHEMERAL_SETTING".to_string(),
+                    message_wire::ProtocolMessage_PROTOCOL_MESSAGE_TYPE::EPHEMERAL_SYNC_RESPONSE => "EPHEMERAL_SYNC_RESPONSE".to_string(),
+                    message_wire::ProtocolMessage_PROTOCOL_MESSAGE_TYPE::HISTORY_SYNC_NOTIFICATION => "HISTORY_SYNC_NOTIFICATION".to_string(),
+                },
+            )
+        } else if message.has_contactMessage() {
+            let mut contact_message = message.take_contactMessage();
+            ChatMessageContent::ContactMessage(ContactMessage {
+                display_name: contact_message.take_displayName(),
+                v_card: contact_message.take_vcard(),
+            })
+        } else if message.has_contactsArrayMessage() {
+            let mut contact_array_message = message.take_contactsArrayMessage();
+            let array_contacts = contact_array_message.take_contacts();
+
+            let mut contacts = Vec::new();
+            for contact in array_contacts.iter() {
+                contacts.push(ContactMessage {
+                    display_name: contact.get_displayName().to_string(),
+                    v_card: contact.get_vcard().to_string(),
+                });
+            }
+
+            ChatMessageContent::ContactArrayMessage(
+                contact_array_message.take_displayName(),
+                contacts,
+            )
+        } else if message.has_extendedTextMessage() {
+            let mut extended_text_message = message.take_extendedTextMessage();
+            ChatMessageContent::ExtendedTextMessage(ExtendedTextMessage {
+                text: extended_text_message.take_text(),
+                title: extended_text_message.take_title(),
+                description: extended_text_message.take_description(),
+                thumbnail: extended_text_message.take_jpegThumbnail(),
+            })
         } else {
+            warn!("Unknown message: {:?}", message);
             ChatMessageContent::Text("TODO".to_string())
         })
     }
@@ -186,7 +335,7 @@ impl ChatMessageContent {
         let mut message = message_wire::Message::new();
         match self {
             ChatMessageContent::Text(text) => message.set_conversation(text),
-            ChatMessageContent::Image(info, size, thumbnail) => {
+            ChatMessageContent::Image(info, size, caption, thumbnail) => {
                 let mut image_message = message_wire::ImageMessage::new();
                 image_message.set_url(info.url);
                 image_message.set_mimetype(info.mime);
@@ -197,6 +346,7 @@ impl ChatMessageContent {
                 image_message.set_height(size.0);
                 image_message.set_width(size.1);
                 image_message.set_jpegThumbnail(thumbnail);
+                image_message.set_caption(caption);
                 message.set_imageMessage(image_message);
             }
             ChatMessageContent::Document(info, filename) => {
@@ -267,7 +417,7 @@ impl ChatMessage {
 
         webmessage.set_message(self.content.into_proto());
 
-        webmessage.set_status(message_wire::WebMessageInfo_STATUS::PENDING);
+        webmessage.set_status(message_wire::WebMessageInfo_WEB_MESSAGE_INFO_STATUS::PENDING);
         debug!("Building WebMessageInfo: {:?}", &webmessage);
 
         webmessage

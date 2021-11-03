@@ -7,7 +7,6 @@ use super::{Jid, PresenceStatus, GroupMetadata, GroupParticipantsChange, MediaTy
 use message::MessageAckLevel;
 use errors::*;
 
-
 #[derive(Debug)]
 pub enum ServerMessage<'a> {
     ConnectionAck { user_jid: Jid, client_token: &'a str, server_token: &'a str, secret: Option<&'a str> },
@@ -209,6 +208,7 @@ impl GroupParticipantsChange {
 }
 
 pub fn parse_response_status(response: &JsonValue) -> Result<()> {
+    info!("{}", response);
     response["status"].as_u16().map_or(Ok(()), |status_code| if status_code == 200 {
         Ok(())
     } else {
@@ -217,7 +217,11 @@ pub fn parse_response_status(response: &JsonValue) -> Result<()> {
 }
 
 pub fn build_init_request(client_id: &str) -> JsonValue {
-    array!["admin", "init", array![0, 3, 416], array!["ww-rs", "ww-rs"], client_id, true]
+    array!["admin", "init", array![2, 2142, 12], array!["Mac OS", "Chrome", "10.15.7"], client_id, true]
+//    array!["admin", "init", array![2, 2121, 6], array!["Mac OS", "Firefox", "10.15"], client_id, true]
+//    array!["admin", "init", array![0, 4, 2081], array!["ww-rs", "Chromium"], client_id, true]
+//    let nav = format!("Chromium at {}", Local::now().to_rfc3339());
+//    array!["admin", "init", array![0, 4, 2081], array![nav.as_str(), "Chromium"], client_id, true]
 }
 
 pub fn parse_init_response<'a>(response: &'a JsonValue) -> Result<&'a str> {
