@@ -217,7 +217,8 @@ pub fn parse_response_status(response: &JsonValue) -> Result<()> {
 }
 
 pub fn build_init_request(client_id: &str) -> JsonValue {
-    array!["admin", "init", array![2, 2121, 6], array!["Mac OS", "Firefox", "10.15"], client_id, true]
+    array!["admin", "init", array![2, 2142, 12], array!["Mac OS", "Chrome", "10.15.7"], client_id, true]
+//    array!["admin", "init", array![2, 2121, 6], array!["Mac OS", "Firefox", "10.15"], client_id, true]
 //    array!["admin", "init", array![0, 4, 2081], array!["ww-rs", "Chromium"], client_id, true]
 //    let nav = format!("Chromium at {}", Local::now().to_rfc3339());
 //    array!["admin", "init", array![0, 4, 2081], array![nav.as_str(), "Chromium"], client_id, true]
